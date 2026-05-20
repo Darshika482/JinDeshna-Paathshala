@@ -1,21 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
-function readStoredSupabase() {
-  try {
-    const raw = localStorage.getItem('shiviros-config');
-    if (!raw) return {};
-    const state = JSON.parse(raw)?.state || {};
-    return { url: state.supabaseUrl || '', key: state.supabaseAnonKey || '' };
-  } catch { return {}; }
-}
+const SUPABASE_URL = 'https://lfnkzwxufdohjxnixikh.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxmbmt6d3h1ZmRvaGp4bml4aWtoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyNjM5NjgsImV4cCI6MjA5NDgzOTk2OH0.64GMDwI1n30qRCBmK5E0qqbP8qY9qrsSjRc-37oCeLI';
 
-const stored = readStoredSupabase();
-const SUPABASE_URL = stored.url || '';
-const SUPABASE_KEY = stored.key || '';
-
-export const isSupabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_KEY);
-// Provide placeholder to avoid createClient throwing on empty strings
-export const supabase = createClient(
-  SUPABASE_URL || 'https://placeholder.supabase.co',
-  SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholder.placeholder'
-);
+export const isSupabaseConfigured = true;
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);

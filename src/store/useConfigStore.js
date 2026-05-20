@@ -11,28 +11,19 @@ export const DEFAULT_BATCH_CLASSES = {
 export const useConfigStore = create(
   persist(
     (set) => ({
-      supabaseUrl: '',
-      supabaseAnonKey: '',
-      campName: '',
+      campName: 'JinDeshna Paathshala',
       campCity: '',
       campStartDate: '',
       campEndDate: '',
       campTotalDays: 7,
       adminPassword: '',
       coinkeeperPin: '',
-      isSetupComplete: false,
+      isSetupComplete: true,
       batchClasses: null, // null = use DEFAULT_BATCH_CLASSES
 
-      saveSupabaseConfig: (cfg) => set(cfg),
       saveCampConfig: (cfg) => set(cfg),
       saveBatchClasses: (batchClasses) => set({ batchClasses }),
-      completeSetup: () => set({ isSetupComplete: true }),
-      resetConfig: () => set({
-        supabaseUrl: '', supabaseAnonKey: '', campName: '', campCity: '',
-        campStartDate: '', campEndDate: '', campTotalDays: 7,
-        adminPassword: '', coinkeeperPin: '', isSetupComplete: false,
-        batchClasses: null,
-      }),
+      resetConfig: () => set({ campName: 'JinDeshna Paathshala', isSetupComplete: true, batchClasses: null }),
     }),
     { name: 'shiviros-config' }
   )
