@@ -278,13 +278,67 @@ function AddStudentModal({ pathshala, onSave, onClose }) {
     if (fileRef.current) fileRef.current.value = '';
   };
 
-  const downloadStudentTemplate = () => {
-    const csv = buildCSV(STUDENT_CSV_HEADERS, [
-      ['Arham Jain', 'Vikram Jain', '9179105875', 'Male', '9', '6–10 yrs', 'Children Group'],
-      ['Aarvi Jain', 'Sachin Jain', '7067514988', 'Female', '11', '11–15 yrs', 'Senior Group'],
-    ]);
-    triggerDownload(`pathshala-${pathshala.paathshala_code}-students-template.csv`, csv);
-    toast.success('Student template downloaded');
+  const downloadStudentTemplate = async () => {
+    try {
+      const ExcelJS = (await import('exceljs')).default;
+      const wb = new ExcelJS.Workbook();
+
+      // Hidden sheet for dropdown source data
+      const optSheet = wb.addWorksheet('_Options');
+      optSheet.state = 'veryHidden';
+      GENDER_OPTIONS.forEach((v, i) => { optSheet.getCell(i + 1, 1).value = v; });
+      AGE_GROUP_OPTIONS.forEach((v, i) => { optSheet.getCell(i + 1, 2).value = v; });
+      CLASS_OPTIONS.forEach((v, i) => { optSheet.getCell(i + 1, 3).value = v; });
+
+      const ws = wb.addWorksheet('Students Template');
+      ws.columns = [
+        { header: 'Student Name',        key: 'name',        width: 26 },
+        { header: "Father/Mother's Name", key: 'parent',      width: 26 },
+        { header: 'Mobile Number',        key: 'mobile',      width: 16 },
+        { header: 'Gender',               key: 'gender',      width: 12 },
+        { header: 'Age',                  key: 'age',         width: 8  },
+        { header: 'Age Group',            key: 'age_group',   width: 15 },
+        { header: 'Class Group',          key: 'class_group', width: 18 },
+      ];
+      ws.getRow(1).eachCell(cell => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A3D2B' } };
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      });
+      ws.getRow(1).height = 22;
+
+      ws.addRow(['Arham Jain',  'Vikram Jain', '9179105875', 'Male',   9,  '6–10 yrs',  'Children Group']);
+      ws.addRow(['Aarvi Jain',  'Sachin Jain', '7067514988', 'Female', 11, '11–15 yrs', 'Senior Group']);
+
+      // Add real dropdown validations for rows 2–101 (100 student slots)
+      for (let row = 2; row <= 101; row++) {
+        ws.getCell(row, 4).dataValidation = {
+          type: 'list', allowBlank: true,
+          formulae: [`_Options!$A$1:$A$${GENDER_OPTIONS.length}`],
+        };
+        ws.getCell(row, 6).dataValidation = {
+          type: 'list', allowBlank: true,
+          formulae: [`_Options!$B$1:$B$${AGE_GROUP_OPTIONS.length}`],
+        };
+        ws.getCell(row, 7).dataValidation = {
+          type: 'list', allowBlank: true,
+          formulae: [`_Options!$C$1:$C$${CLASS_OPTIONS.length}`],
+        };
+      }
+
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `pathshala-${pathshala.paathshala_code}-students-template.xlsx`;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
+      toast.success('Excel template with dropdowns downloaded!');
+    } catch (err) {
+      toast.error('Failed to generate template');
+      console.error(err);
+    }
   };
 
   return (
@@ -353,18 +407,18 @@ function AddStudentModal({ pathshala, onSave, onClose }) {
               className="w-full flex items-center gap-3 border-2 border-forest-200 hover:border-forest-500 rounded-xl p-3 text-left transition-colors group">
               <div className="w-10 h-10 bg-forest-50 group-hover:bg-forest-100 rounded-lg flex items-center justify-center text-xl flex-shrink-0">📥</div>
               <div>
-                <div className="font-semibold text-sm text-gray-800">Download Student CSV Template</div>
-                <div className="text-xs text-gray-500">Includes Name, Parent, Mobile, Gender, Age, Group columns</div>
+                <div className="font-semibold text-sm text-gray-800">Download Excel Template (with Dropdowns)</div>
+                <div className="text-xs text-gray-500">Gender, Age Group, Class Group cells have real click-to-select dropdowns</div>
               </div>
             </button>
 
             <label className="w-full flex items-center gap-3 border-2 border-dashed border-saffron-300 hover:border-saffron-500 rounded-xl p-4 text-left transition-colors cursor-pointer bg-saffron-50 hover:bg-saffron-100">
               <div className="text-2xl">📤</div>
               <div className="flex-1">
-                <div className="font-semibold text-sm text-gray-800">{csvUploading ? 'Uploading…' : 'Upload Filled CSV'}</div>
-                <div className="text-xs text-gray-500">Click to browse or drop your .csv file here</div>
+                <div className="font-semibold text-sm text-gray-800">{csvUploading ? 'Uploading…' : 'Upload Filled CSV / Excel'}</div>
+                <div className="text-xs text-gray-500">Click to browse or drop your .csv or .xlsx file here</div>
               </div>
-              <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={e => handleCSVFile(e.target.files?.[0])} disabled={csvUploading} />
+              <input ref={fileRef} type="file" accept=".csv,.xlsx" className="hidden" onChange={e => handleCSVFile(e.target.files?.[0])} disabled={csvUploading} />
             </label>
 
             {csvResult && (
@@ -600,6 +654,7 @@ export default function AdminPathshala() {
           const myStudents = students
             .filter(s => s.paathshala_code === p.paathshala_code)
             .sort((a, b) => String(a.roll_no).localeCompare(String(b.roll_no)));
+          const totalScore = myStudents.reduce((sum, s) => sum + (Number(s.total_points) || 0), 0);
 
           return (
             <div key={p.id} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
@@ -621,6 +676,9 @@ export default function AdminPathshala() {
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5 text-xs">
                   <span className="px-2 py-1 rounded-full bg-blue-100 text-blue-700 font-medium">Students {myStudents.length}</span>
+                  {totalScore > 0 && (
+                    <span className="px-2 py-1 rounded-full bg-saffron-100 text-saffron-700 font-bold">⭐ {totalScore} pts</span>
+                  )}
                   {p.classes_conducted?.length > 0 && (
                     <span className="px-2 py-1 rounded-full bg-forest-100 text-forest-700 font-medium">{p.classes_conducted.join(', ')}</span>
                   )}
@@ -692,9 +750,12 @@ export default function AdminPathshala() {
                       <div className="flex flex-wrap gap-2">
                         {myStudents.map(s => (
                           <span key={s.id}
-                            className="text-xs px-2.5 py-1 rounded-full border border-gray-200 bg-white text-gray-700">
-                            {s.roll_no || '—'} • {s.name}
-                            {s.gender ? ` (${s.gender[0]})` : ''}
+                            className="text-xs px-2.5 py-1 rounded-full border border-gray-200 bg-white text-gray-700 flex items-center gap-1">
+                            <span className="font-mono text-gray-500">{s.roll_no || '—'}</span>
+                            <span>• {s.name}{s.gender ? ` (${s.gender[0]})` : ''}</span>
+                            {(Number(s.total_points) > 0) && (
+                              <span className="ml-1 font-bold text-saffron-600">⭐{s.total_points}</span>
+                            )}
                           </span>
                         ))}
                       </div>

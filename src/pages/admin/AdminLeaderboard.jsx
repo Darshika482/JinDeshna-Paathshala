@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStudentStore } from '../../store/useStudentStore.js';
 import { useTransactionStore } from '../../store/useTransactionStore.js';
+import { usePathshalaStore } from '../../store/usePathshalaStore.js';
 import { supabase } from '../../lib/supabase.js';
 import { getCampDayForDate } from '../../lib/campDates.js';
 import Select from '../../components/common/Select.jsx';
@@ -459,7 +460,9 @@ export default function AdminLeaderboard() {
   const { t } = useTranslation();
   const { students } = useStudentStore();
   const { transactions } = useTransactionStore();
+  const { paathshalas, students: pathshalaStudents } = usePathshalaStore();
 
+  const [activeTab, setActiveTab] = useState('students'); // 'students' | 'paathshala'
   const [filterBatch, setFilterBatch] = useState('All');
   const [filterClass, setFilterClass] = useState('All');
   const [filterRoom, setFilterRoom] = useState('All');
@@ -559,6 +562,15 @@ export default function AdminLeaderboard() {
     (selectedAges.size === 0 || selectedAges.has(Number(s.age)))
   );
 
+  // Paathshala Rankings: aggregate student points per school
+  const pathshalaRankings = paathshalas
+    .map(p => {
+      const myStudents = pathshalaStudents.filter(s => s.paathshala_code === p.paathshala_code);
+      const totalPoints = myStudents.reduce((sum, s) => sum + (Number(s.total_points) || 0), 0);
+      return { ...p, totalPoints, studentCount: myStudents.length };
+    })
+    .sort((a, b) => b.totalPoints - a.totalPoints);
+
   return (
     <div className="p-3 sm:p-6">
       {/* Header */}
@@ -567,13 +579,120 @@ export default function AdminLeaderboard() {
           <h1 className="text-xl font-bold text-gray-900">🏆 Leaderboard</h1>
           <p className="text-xs text-gray-500 mt-0.5">{leaderboard.length} students · points from transactions</p>
         </div>
-        {filtered.length !== leaderboard.length && (
+        {activeTab === 'students' && filtered.length !== leaderboard.length && (
           <span className="text-sm text-saffron-700 font-semibold bg-saffron-50 border border-saffron-200 px-3 py-1 rounded-full">
             {filtered.length} shown
           </span>
         )}
       </div>
 
+      {/* Tab switcher */}
+      <div className="flex gap-1 mb-4 bg-slate-100 rounded-xl p-1 w-fit">
+        <button
+          onClick={() => setActiveTab('students')}
+          className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'students' ? 'bg-white text-forest-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          👤 Student Rankings
+        </button>
+        <button
+          onClick={() => setActiveTab('paathshala')}
+          className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'paathshala' ? 'bg-white text-forest-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          🏫 Paathshala Rankings
+        </button>
+      </div>
+
+      {/* Paathshala Rankings Tab */}
+      {activeTab === 'paathshala' && (
+        <div className="space-y-3">
+          {pathshalaRankings.length === 0 ? (
+            <div className="text-center py-16 text-gray-400 bg-white rounded-2xl border border-gray-200">
+              <div className="text-4xl mb-2">🕌</div>
+              <div className="text-sm">No Paathshalas registered yet</div>
+            </div>
+          ) : (
+            <>
+              {/* Top 3 podium */}
+              {pathshalaRankings.length >= 2 && (
+                <div className="bg-gradient-to-br from-forest-800 to-forest-900 rounded-2xl p-5 text-white mb-4">
+                  <div className="text-xs font-bold uppercase tracking-widest text-forest-300 mb-4 text-center">Overall Standings</div>
+                  <div className="flex items-end justify-center gap-3">
+                    {/* 2nd */}
+                    {pathshalaRankings[1] && (
+                      <div className="flex-1 text-center">
+                        <div className="text-2xl mb-1">🥈</div>
+                        <div className="bg-white/10 rounded-xl p-2">
+                          <div className="font-bold text-xs truncate">{pathshalaRankings[1].paathshala_name}</div>
+                          <div className="text-saffron-300 font-bold text-lg">{pathshalaRankings[1].totalPoints}</div>
+                          <div className="text-forest-300 text-xs">{pathshalaRankings[1].studentCount} students</div>
+                        </div>
+                      </div>
+                    )}
+                    {/* 1st — taller */}
+                    <div className="flex-1 text-center -mb-1">
+                      <div className="text-3xl mb-1">🥇</div>
+                      <div className="bg-saffron-500/20 border border-saffron-400/30 rounded-xl p-3">
+                        <div className="font-bold text-sm truncate">{pathshalaRankings[0].paathshala_name}</div>
+                        <div className="text-saffron-300 font-bold text-2xl">{pathshalaRankings[0].totalPoints}</div>
+                        <div className="text-forest-300 text-xs">{pathshalaRankings[0].studentCount} students</div>
+                      </div>
+                    </div>
+                    {/* 3rd */}
+                    {pathshalaRankings[2] && (
+                      <div className="flex-1 text-center">
+                        <div className="text-2xl mb-1">🥉</div>
+                        <div className="bg-white/10 rounded-xl p-2">
+                          <div className="font-bold text-xs truncate">{pathshalaRankings[2].paathshala_name}</div>
+                          <div className="text-saffron-300 font-bold text-lg">{pathshalaRankings[2].totalPoints}</div>
+                          <div className="text-forest-300 text-xs">{pathshalaRankings[2].studentCount} students</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Full ranked list */}
+              <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-forest-700 text-white">
+                    <tr>
+                      <th className="px-4 py-3 text-center w-16">Rank</th>
+                      <th className="px-4 py-3 text-left">Paathshala</th>
+                      <th className="px-4 py-3 text-left hidden sm:table-cell">Teacher</th>
+                      <th className="px-4 py-3 text-center">Students</th>
+                      <th className="px-4 py-3 text-right">Total Points</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pathshalaRankings.map((p, idx) => (
+                      <tr key={p.id} className={`border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} ${idx < 3 ? 'font-semibold' : ''}`}>
+                        <td className="px-4 py-3 text-center">
+                          {RANK_MEDALS[idx + 1] || <span className="text-gray-500 font-mono text-sm">#{idx + 1}</span>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-gray-900">{p.paathshala_name}</div>
+                          {p.address && <div className="text-xs text-gray-500 truncate max-w-[200px]">{p.address}</div>}
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 hidden sm:table-cell">{p.teacher1_name || '—'}</td>
+                        <td className="px-4 py-3 text-center">
+                          <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs font-semibold">{p.studentCount}</span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className="font-bold text-saffron-600 text-base">{p.totalPoints}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Student Rankings Tab */}
+      {activeTab !== 'paathshala' && <>
       {/* Search */}
       <div className="relative mb-3">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
@@ -752,6 +871,7 @@ export default function AdminLeaderboard() {
           onClose={() => setSelectedStudent(null)}
         />
       )}
+      </>}
     </div>
   );
 }
