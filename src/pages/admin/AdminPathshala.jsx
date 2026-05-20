@@ -378,10 +378,30 @@ function AddStudentModal({ pathshala, onSave, onClose }) {
         <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-forest-800 to-forest-700 text-white">
           <div>
             <h2 className="font-bold">Add Students</h2>
-            <p className="text-xs text-forest-300 mt-0.5">{pathshala.paathshala_name} (Code: {pathshala.paathshala_code})</p>
+            <p className="text-xs text-forest-300 mt-0.5">{pathshala.paathshala_name} · Code: {pathshala.paathshala_code}</p>
           </div>
           <button onClick={onClose} className="text-white/70 hover:text-white text-xl">✕</button>
         </div>
+
+        {/* Teacher accompanying info */}
+        {(pathshala.teacher1_name || pathshala.teacher2_name) && (
+          <div className="mx-5 mt-3 flex items-start gap-2 px-3 py-2.5 bg-forest-50 border border-forest-200 rounded-xl text-sm">
+            <span className="text-base mt-0.5">👩‍🏫</span>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-bold text-forest-600 uppercase tracking-wide mb-0.5">Teacher accompanying this group</div>
+              <div className="font-semibold text-forest-900 truncate">
+                {pathshala.teacher1_name}
+                {pathshala.teacher1_mobile && <span className="font-normal text-forest-600 ml-2 text-xs">{pathshala.teacher1_mobile}</span>}
+              </div>
+              {pathshala.teacher2_name && (
+                <div className="text-forest-700 text-xs mt-0.5 truncate">
+                  Also: {pathshala.teacher2_name}
+                  {pathshala.teacher2_mobile && <span className="text-forest-500 ml-1">{pathshala.teacher2_mobile}</span>}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex border-b border-gray-200">
@@ -750,9 +770,16 @@ export default function AdminPathshala() {
 
                   {/* Students section */}
                   <div className="mt-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="text-xs font-semibold text-gray-500">
-                        Students ({myStudents.length})
+                    <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-semibold text-gray-700">
+                          Students ({myStudents.length})
+                        </span>
+                        {p.teacher1_name && (
+                          <span className="text-xs text-forest-700 bg-forest-50 border border-forest-200 px-2 py-0.5 rounded-full">
+                            👩‍🏫 {p.teacher1_name}
+                          </span>
+                        )}
                       </div>
                       <div className="flex gap-2">
                         <button
@@ -774,20 +801,51 @@ export default function AdminPathshala() {
                     </div>
 
                     {myStudents.length === 0 ? (
-                      <div className="text-sm text-gray-400 py-2">
+                      <div className="text-sm text-gray-400 py-3 px-1">
                         No students yet — click <strong>+ Add Students</strong> above.
                       </div>
                     ) : (
-                      <div className="flex flex-wrap gap-2">
+                      <div className="space-y-1.5">
                         {myStudents.map(s => (
-                          <span key={s.id}
-                            className="text-xs px-2.5 py-1 rounded-full border border-gray-200 bg-white text-gray-700 flex items-center gap-1">
-                            <span className="font-mono text-gray-500">{s.roll_no || '—'}</span>
-                            <span>• {s.name}{s.gender ? ` (${s.gender[0]})` : ''}</span>
-                            {(Number(s.total_points) > 0) && (
-                              <span className="ml-1 font-bold text-saffron-600">⭐{s.total_points}</span>
+                          <div key={s.id}
+                            className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 bg-slate-50 rounded-xl border border-gray-100 text-sm">
+                            {/* Roll No */}
+                            <span className="font-mono font-bold text-forest-700 text-xs w-10 flex-shrink-0">{s.roll_no || '—'}</span>
+                            {/* Name */}
+                            <span className="font-semibold text-gray-900 min-w-[120px]">{s.name}</span>
+                            {/* Parent */}
+                            {(s.parent_name || s.father_name) && (
+                              <span className="text-xs text-gray-500 flex items-center gap-1">
+                                <span>👤</span>{s.parent_name || s.father_name}
+                              </span>
                             )}
-                          </span>
+                            {/* Mobile */}
+                            {s.mobile && (
+                              <span className="text-xs text-gray-500 flex items-center gap-1">
+                                <span>📱</span>{s.mobile}
+                              </span>
+                            )}
+                            {/* Gender */}
+                            {s.gender && (
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                /^m/i.test(s.gender) ? 'bg-blue-50 text-blue-600' : 'bg-pink-50 text-pink-600'
+                              }`}>{s.gender}</span>
+                            )}
+                            {/* Age */}
+                            {s.age && <span className="text-xs text-gray-500">{s.age} yrs</span>}
+                            {/* Age Group (stored in batch) */}
+                            {s.batch && (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 font-medium">{s.batch}</span>
+                            )}
+                            {/* Class Group */}
+                            {s.group && (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-forest-50 text-forest-700 font-medium">{s.group}</span>
+                            )}
+                            {/* Points */}
+                            {Number(s.total_points) > 0 && (
+                              <span className="ml-auto font-bold text-saffron-600 text-xs flex-shrink-0">⭐ {s.total_points}</span>
+                            )}
+                          </div>
                         ))}
                       </div>
                     )}
