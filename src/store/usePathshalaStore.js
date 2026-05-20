@@ -19,6 +19,13 @@ function generateRollNo(pathshalaCode, allStudents) {
   return `${pp}${String(nextSeq).padStart(2, '0')}`;
 }
 
+const INT_FIELDS = ['students_2_5', 'students_6_10', 'students_11_15', 'students_15_21'];
+function coerceInts(data) {
+  const out = { ...data };
+  INT_FIELDS.forEach(k => { out[k] = parseInt(out[k] || 0) || 0; });
+  return out;
+}
+
 export const usePathshalaStore = create(
   persist(
     (set, get) => ({
@@ -43,7 +50,7 @@ export const usePathshalaStore = create(
         const { paathshalas } = get();
         const code = generatePathshalaCode(paathshalas);
         const newP = {
-          ...formData,
+          ...coerceInts(formData),
           id: `p_${Date.now()}`,
           paathshala_code: code,
           created_at: new Date().toISOString(),
@@ -55,7 +62,7 @@ export const usePathshalaStore = create(
       },
 
       updatePathshala: async (id, formData) => {
-        const { error } = await supabase.from('paathshalas').update(formData).eq('id', id);
+        const { error } = await supabase.from('paathshalas').update(coerceInts(formData)).eq('id', id);
         if (error) return { success: false, error: error.message };
         set(state => ({
           paathshalas: state.paathshalas.map(p => p.id === id ? { ...p, ...formData } : p),
