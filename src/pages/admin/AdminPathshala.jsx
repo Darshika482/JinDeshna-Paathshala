@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Papa from 'papaparse';
 import toast from 'react-hot-toast';
 import { usePathshalaStore } from '../../store/usePathshalaStore.js';
@@ -58,26 +59,55 @@ function triggerDownload(filename, content, type = 'text/csv;charset=utf-8;') {
 }
 
 // ─── Custom Select ─────────────────────────────────────────────────────────────
+// Renders the dropdown list via a React portal so it is never clipped by
+// overflow-hidden / overflow-auto ancestor containers inside modals.
 function CustomSelect({ value, onChange, options, placeholder = 'Select…' }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef();
+  const [rect, setRect] = useState(null);
+  const btnRef = useRef();
+  const listRef = useRef();
+
   useEffect(() => {
-    const fn = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const fn = e => {
+      if (
+        btnRef.current && !btnRef.current.contains(e.target) &&
+        listRef.current && !listRef.current.contains(e.target)
+      ) setOpen(false);
+    };
     document.addEventListener('mousedown', fn);
     return () => document.removeEventListener('mousedown', fn);
   }, []);
+
+  const handleOpen = () => {
+    if (!open && btnRef.current) {
+      setRect(btnRef.current.getBoundingClientRect());
+    }
+    setOpen(o => !o);
+  };
+
   const label = options.find(o => o === value) || null;
+
   return (
-    <div ref={ref} className="relative">
-      <button type="button" onClick={() => setOpen(o => !o)}
+    <div className="relative">
+      <button ref={btnRef} type="button" onClick={handleOpen}
         className="w-full flex items-center justify-between border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white hover:border-forest-400 focus:outline-none focus:ring-2 focus:ring-forest-500 transition-colors">
         <span className={label ? 'text-gray-800' : 'text-gray-400'}>{label ?? placeholder}</span>
         <svg className={`w-4 h-4 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
-      {open && (
-        <ul className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden">
+      {open && rect && createPortal(
+        <ul
+          ref={listRef}
+          style={{
+            position: 'fixed',
+            top: rect.bottom + 4,
+            left: rect.left,
+            width: rect.width,
+            zIndex: 9999,
+          }}
+          className="bg-white border border-gray-200 rounded-lg shadow-2xl overflow-hidden"
+        >
           <li onClick={() => { onChange(''); setOpen(false); }}
             className="px-3 py-2 text-sm text-gray-400 hover:bg-gray-50 cursor-pointer">{placeholder}</li>
           {options.map(opt => (
@@ -87,7 +117,8 @@ function CustomSelect({ value, onChange, options, placeholder = 'Select…' }) {
               {opt}
             </li>
           ))}
-        </ul>
+        </ul>,
+        document.body
       )}
     </div>
   );
