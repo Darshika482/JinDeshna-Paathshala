@@ -5,7 +5,6 @@ import { useAuthStore } from '../../store/useAuthStore.js';
 import LanguageToggle from '../../components/common/LanguageToggle.jsx';
 import OfflineBanner from '../../components/common/OfflineBanner.jsx';
 import AdminDashboard from './AdminDashboard.jsx';
-import AdminStudents from './AdminStudents.jsx';
 import AdminLeaderboard from './AdminLeaderboard.jsx';
 import AdminSchedule from './AdminSchedule.jsx';
 import AdminCoinAllocation from './AdminCoinAllocation.jsx';
@@ -22,8 +21,7 @@ import { useConfigStore } from '../../store/useConfigStore.js';
 const NAV_ITEMS = [
   { key: 'dashboard',     icon: '📊', label: 'admin.dashboard' },
   { key: 'checkIn',       icon: '✅', label: 'admin.checkIn' },
-  { key: 'students',      icon: '👥', label: 'admin.students' },
-  { key: 'classes',       icon: '🕌', label: 'admin.pathshala' },
+  { key: 'classes',       icon: '🏫', label: 'admin.pathshala' },
   { key: 'leaderboard',   icon: '🏆', label: 'admin.leaderboard' },
   { key: 'schedule',      icon: '📅', label: 'admin.schedule' },
   { key: 'coinAllocation',icon: '🪙', label: 'admin.coinAllocation' },
@@ -37,7 +35,6 @@ const NAV_ITEMS = [
 const PAGES = {
   dashboard:     AdminDashboard,
   checkIn:       AdminCheckInRecords,
-  students:      AdminStudents,
   classes:       AdminPathshala,
   leaderboard:   AdminLeaderboard,
   schedule:      AdminSchedule,

@@ -1,12 +1,16 @@
 import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStudentStore } from '../../store/useStudentStore.js';
-import { useConfigStore, DEFAULT_BATCH_CLASSES } from '../../store/useConfigStore.js';
+import { usePathshalaStore } from '../../store/usePathshalaStore.js';
 import ConfirmDialog from '../../components/common/ConfirmDialog.jsx';
 import Papa from 'papaparse';
 import { getTeacherNameForClass } from '../../lib/classTeachers.js';
 
-const EMPTY_STUDENT = { roll_no: '', name: '', mobile: '', gender: '', batch: '', class: '', room_no: '', group: '', parent_name: '', mother_name: '', age: '', reg_id: '', city: '', pin_code: '', address: '', pathshala: '', achievements: '' };
+const EMPTY_STUDENT = {
+  roll_no: '', name: '', mobile: '', gender: '', batch: '', class: '', room_no: '', group: '',
+  parent_name: '', mother_name: '', age: '', reg_id: '', city: '', pin_code: '', address: '',
+  pathshala: '', achievements: '', teacher1_name: '', teacher2_name: '', teacher_mobile: '',
+};
 
 const CSV_HEADERS = [
   'Roll Number', 'Reg ID', 'Child Name',
@@ -41,6 +45,36 @@ function getFatherName(student) {
   return String(student?.parent_name || student?.father_name || '').trim();
 }
 
+function getTeacherMeta(student, fallbackTeacherName, pathshalaMap) {
+  const pathshala = pathshalaMap.get(String(student?.paathshala_code || '').trim());
+  const teacher1 = String(
+    student?.teacher1_name ||
+    student?.teacher_1 ||
+    pathshala?.teacher1_name ||
+    fallbackTeacherName ||
+    ''
+  ).trim();
+  const teacher2 = String(
+    student?.teacher2_name ||
+    student?.teacher_2 ||
+    pathshala?.teacher2_name ||
+    ''
+  ).trim();
+  const teacherMobile = String(
+    student?.teacher_mobile ||
+    student?.teacher1_mobile ||
+    student?.teacher_mobile_no ||
+    pathshala?.teacher1_mobile ||
+    ''
+  ).trim();
+
+  return {
+    teacher1: teacher1 || '—',
+    teacher2: teacher2 || '—',
+    teacherMobile: teacherMobile || '—',
+  };
+}
+
 function buildCSV(rows) {
   return [CSV_HEADERS, ...rows]
     .map(row => row.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
@@ -62,7 +96,7 @@ function downloadCSV(filename, csvContent) {
 export default function AdminStudents() {
   const { t, i18n } = useTranslation();
   const { students, addStudent, updateStudent, deleteStudent, importFromCSV } = useStudentStore();
-  const BATCH_CLASSES = useConfigStore(s => s.batchClasses) || DEFAULT_BATCH_CLASSES;
+  const paathshalas = usePathshalaStore(s => s.paathshalas || []);
   const isHindi = i18n.language === 'hi';
 
   const [searchQ, setSearchQ] = useState('');
@@ -94,6 +128,14 @@ export default function AdminStudents() {
       return acc;
     }, {});
   }, [students]);
+
+  const pathshalaByCode = useMemo(() => {
+    return new Map(
+      paathshalas
+        .filter(p => String(p?.paathshala_code || '').trim())
+        .map(p => [String(p.paathshala_code).trim(), p])
+    );
+  }, [paathshalas]);
 
   const filterCounts = useMemo(() => ({
     not_checked_in: students.filter(s => !s.checked_in).length,
@@ -146,12 +188,13 @@ export default function AdminStudents() {
 
   const handleSave = async () => {
     if (!validate()) return;
+    const { teacher1_name, teacher2_name, teacher_mobile, ...studentFields } = form;
     const normalized = {
-      ...form,
-      name: toTitleCase(form.name),
-      parent_name: toTitleCase(form.parent_name),
-      mother_name: toTitleCase(form.mother_name),
-      age: form.age ? (parseInt(form.age) || null) : null,
+      ...studentFields,
+      name: toTitleCase(studentFields.name),
+      parent_name: toTitleCase(studentFields.parent_name),
+      mother_name: toTitleCase(studentFields.mother_name),
+      age: studentFields.age ? (parseInt(studentFields.age) || null) : null,
     };
     const friendlyError = (msg) => {
       if (msg?.includes('duplicate key') || msg?.includes('unique constraint'))
@@ -187,6 +230,9 @@ export default function AdminStudents() {
       age: s.age || '', reg_id: s.reg_id || '',
       city: s.city || '', pin_code: s.pin_code || '', address: s.address || '',
       pathshala: s.pathshala || '', achievements: s.achievements || '',
+      teacher1_name: s.teacher1_name || s.teacher_1 || '',
+      teacher2_name: s.teacher2_name || s.teacher_2 || '',
+      teacher_mobile: s.teacher_mobile || s.teacher1_mobile || s.teacher_mobile_no || '',
     });
     setShowForm(true);
     setErrors({});
@@ -403,16 +449,10 @@ export default function AdminStudents() {
               {[
                 { key: 'roll_no',      label: 'Roll No.',             required: true  },
                 { key: 'name',         label: 'Name (English)',        required: true  },
-                { key: 'mobile',       label: 'Mobile',                required: false },
+                { key: 'mobile',       label: "Parent's Mobile",       required: false },
                 { key: 'age',          label: 'Age',                   required: false },
-                { key: 'group',        label: 'Class Teacher',         required: false },
-                { key: 'parent_name',  label: 'Father Name',           required: false },
-                { key: 'mother_name',  label: 'Mother Name',           required: false },
-                { key: 'reg_id',       label: 'Reg ID',                required: false },
-                { key: 'city',         label: 'City',                  required: false },
-                { key: 'pin_code',     label: 'Pin Code',              required: false },
-                { key: 'pathshala',    label: 'Pathshala Name',        required: false },
-                { key: 'achievements', label: 'Achievements',          required: false },
+                { key: 'batch',        label: 'Age Group',             required: false },
+                { key: 'group',        label: 'Class Group',           required: false },
               ].map(f => (
                 <div key={f.key}>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">
@@ -421,7 +461,7 @@ export default function AdminStudents() {
                   <input
                     className={`input-field ${errors[f.key] ? 'border-red-400' : ''}`}
                     value={form[f.key]}
-                    placeholder={f.key === 'pathshala' ? 'Leave blank if not attending' : f.key === 'achievements' ? 'e.g. State Quiz Winner' : ''}
+                    placeholder={f.key === 'batch' ? 'e.g. Bhag-1' : f.key === 'group' ? 'e.g. Children Group' : ''}
                     onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
                   />
                   {errors[f.key] && <p className="text-red-500 text-xs mt-1">{errors[f.key]}</p>}
@@ -442,67 +482,33 @@ export default function AdminStudents() {
                 </select>
               </div>
 
-              {/* Allotted Book — free text with suggestions */}
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">
-                  Allotted Book <span className="text-red-500">*</span>
-                </label>
-                <input
-                  list="batch-options"
-                  className={`input-field ${errors.batch ? 'border-red-400' : ''}`}
-                  value={form.batch}
-                  placeholder="e.g. Bhag-1"
-                  onChange={e => setForm(p => ({ ...p, batch: e.target.value, class: '' }))}
-                />
-                <datalist id="batch-options">
-                  {Object.keys(BATCH_CLASSES).map(b => <option key={b} value={b} />)}
-                </datalist>
-                {errors.batch && <p className="text-red-500 text-xs mt-1">{errors.batch}</p>}
-              </div>
-
-              {/* Class — dropdown for known books, free text otherwise */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Class</label>
-                {BATCH_CLASSES[form.batch] ? (
-                  <select
-                    className="input-field"
-                    value={form.class}
-                    onChange={e => setForm(p => ({ ...p, class: e.target.value }))}
-                  >
-                    <option value="">Select…</option>
-                    {BATCH_CLASSES[form.batch].map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    className="input-field"
-                    value={form.class}
-                    placeholder="e.g. 3A"
-                    onChange={e => setForm(p => ({ ...p, class: e.target.value.toUpperCase() }))}
-                  />
-                )}
-              </div>
-
-              {/* Room No */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Room No.</label>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Teacher 1</label>
                 <input
                   className="input-field"
-                  placeholder="e.g. D1 or F3"
-                  value={form.room_no}
-                  onChange={e => setForm(p => ({ ...p, room_no: e.target.value.toUpperCase() }))}
+                  value={form.teacher1_name || ''}
+                  placeholder="Teacher name"
+                  onChange={e => setForm(p => ({ ...p, teacher1_name: e.target.value }))}
                 />
               </div>
 
-              {/* Address — full width */}
-              <div className="col-span-2 md:col-span-3">
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Address</label>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Teacher 2</label>
                 <input
                   className="input-field"
-                  placeholder="House / Street / Area"
-                  value={form.address}
-                  onChange={e => setForm(p => ({ ...p, address: e.target.value }))}
+                  value={form.teacher2_name || ''}
+                  placeholder="Teacher name"
+                  onChange={e => setForm(p => ({ ...p, teacher2_name: e.target.value }))}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Teacher Mobile</label>
+                <input
+                  className="input-field"
+                  value={form.teacher_mobile || ''}
+                  placeholder="Teacher mobile"
+                  onChange={e => setForm(p => ({ ...p, teacher_mobile: e.target.value }))}
                 />
               </div>
             </div>
@@ -523,6 +529,7 @@ export default function AdminStudents() {
           const displayTeacher = isHindi
             ? (getTeacherNameForClass(s.class, true) || s.group || '—')
             : (s.group || getTeacherNameForClass(s.class, false) || '—');
+          const teacherMeta = getTeacherMeta(s, displayTeacher, pathshalaByCode);
           return (
           <div key={s.id} className="bg-white border border-gray-200 rounded-2xl p-3 shadow-sm">
             <div className="flex items-start justify-between gap-3">
@@ -538,38 +545,24 @@ export default function AdminStudents() {
 
             <div className="mt-2 flex flex-wrap gap-1.5">
               <span className="px-2 py-0.5 rounded-full text-[11px] bg-forest-100 text-forest-700 font-semibold">
-                {s.batch || 'No Book'}
+                Age Group: {s.batch || '—'}
               </span>
-              {s.class && (
-                <span className="px-2 py-0.5 rounded-full text-[11px] bg-saffron-100 text-saffron-700 font-semibold">
-                  Class {s.class}
-                </span>
-              )}
-              {s.room_no && (
-                <span className="px-2 py-0.5 rounded-full text-[11px] bg-amber-100 text-amber-700 font-semibold">
-                  🏠 {s.room_no}
-                </span>
-              )}
+              <span className="px-2 py-0.5 rounded-full text-[11px] bg-saffron-100 text-saffron-700 font-semibold">
+                Class Group: {s.group || '—'}
+              </span>
               <span className="px-2 py-0.5 rounded-full text-[11px] bg-gray-100 text-gray-700">
                 {s.gender || 'No Gender'}
               </span>
               <span className="px-2 py-0.5 rounded-full text-[11px] bg-gray-100 text-gray-700">
                 Age {s.age || '—'}
               </span>
-              <span className="px-2 py-0.5 rounded-full text-[11px] bg-saffron-100 text-saffron-700 font-semibold">
-                {s.class || 'No Class'}
-              </span>
-              <span className={`px-2 py-0.5 rounded-full text-[11px] ${s.kit_given ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                {s.kit_given ? 'Kit Given' : 'Kit Pending'}
-              </span>
             </div>
-            <div className="mt-1 text-xs text-gray-500 truncate">Teacher: {displayTeacher}</div>
+            <div className="mt-1 text-xs text-gray-500 truncate">Teacher 1: {teacherMeta.teacher1}</div>
+            <div className="text-xs text-gray-500 truncate">Teacher 2: {teacherMeta.teacher2}</div>
+            <div className="text-xs text-gray-500 truncate">Teacher Mobile: {teacherMeta.teacherMobile}</div>
 
             <div className="mt-2 text-xs text-gray-600 truncate">
-              Mobile: {s.mobile || '—'}
-            </div>
-            <div className="text-xs text-gray-600 truncate">
-              Father: {getFatherName(s) || '—'}
+              Parent's Mobile: {s.mobile || '—'}
             </div>
 
             <div className="mt-3 flex gap-2">
@@ -597,18 +590,15 @@ export default function AdminStudents() {
             <thead className="bg-forest-700 text-white">
               <tr>
                 <th className="px-4 py-3 text-left">Roll</th>
-                <th className="px-4 py-3 text-left">Name</th>
+                <th className="px-4 py-3 text-left">Name (English)</th>
+                <th className="px-4 py-3 text-left">Parent's Mobile</th>
                 <th className="px-4 py-3 text-left">Gender</th>
                 <th className="px-4 py-3 text-left">Age</th>
-                <th className="px-4 py-3 text-left">Book</th>
-                <th className="px-4 py-3 text-left">Class</th>
-                <th className="px-4 py-3 text-left">Room</th>
-                <th className="px-4 py-3 text-left">Teacher</th>
-                <th className="px-4 py-3 text-left">Father</th>
-                <th className="px-4 py-3 text-left">Mobile</th>
-                <th className="px-4 py-3 text-left">Health</th>
-                <th className="px-4 py-3 text-left">Kit</th>
-                <th className="px-4 py-3 text-left">Points</th>
+                <th className="px-4 py-3 text-left">Age Group</th>
+                <th className="px-4 py-3 text-left">Class Group</th>
+                <th className="px-4 py-3 text-left">Teacher 1</th>
+                <th className="px-4 py-3 text-left">Teacher 2</th>
+                <th className="px-4 py-3 text-left">Teacher Mobile</th>
                 <th className="px-4 py-3 text-left">Actions</th>
               </tr>
             </thead>
@@ -617,35 +607,25 @@ export default function AdminStudents() {
                 const displayTeacher = isHindi
                   ? (s.group_hi || getTeacherNameForClass(s.class, true) || s.group || '—')
                   : (s.group || getTeacherNameForClass(s.class, false) || s.group_hi || '—');
+                const teacherMeta = getTeacherMeta(s, displayTeacher, pathshalaByCode);
                 return (
                 <tr key={s.id} className={`border-b last:border-0 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                   <td className="px-4 py-3 font-mono text-xs text-gray-600">{s.roll_no}</td>
                   <td className="px-4 py-3 font-semibold text-gray-900">{s.name}</td>
+                  <td className="px-4 py-3 text-gray-600 text-xs">{s.mobile || '—'}</td>
                   <td className="px-4 py-3 text-gray-600 text-xs">{s.gender || '—'}</td>
                   <td className="px-4 py-3 text-gray-600 text-xs">{s.age || '—'}</td>
                   <td className="px-4 py-3">
                     <span className="bg-forest-100 text-forest-700 px-2 py-0.5 rounded-full text-xs font-semibold">{s.batch || '—'}</span>
                   </td>
                   <td className="px-4 py-3">
-                    {s.class
-                      ? <span className="bg-saffron-100 text-saffron-700 px-2 py-0.5 rounded-full text-xs font-semibold">{s.class}</span>
+                    {s.group
+                      ? <span className="bg-saffron-100 text-saffron-700 px-2 py-0.5 rounded-full text-xs font-semibold">{s.group}</span>
                       : <span className="text-gray-400 text-xs">—</span>}
                   </td>
-                  <td className="px-4 py-3">
-                    {s.room_no
-                      ? <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full text-xs font-semibold">{s.room_no}</span>
-                      : <span className="text-gray-400 text-xs">—</span>}
-                  </td>
-                  <td className="px-4 py-3 text-gray-600 text-xs">{displayTeacher}</td>
-                  <td className="px-4 py-3 text-gray-600 text-xs">{getFatherName(s) || '—'}</td>
-                  <td className="px-4 py-3 text-gray-600 text-xs">{s.mobile || '—'}</td>
-                  <td className="px-4 py-3 text-center">
-                    {s.health_issue ? <span className="text-red-500 font-bold text-xs">⚠️ Yes</span> : <span className="text-gray-400 text-xs">—</span>}
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    {s.kit_given ? <span className="text-green-600 font-bold text-xs">✅</span> : <span className="text-amber-500 text-xs">📦</span>}
-                  </td>
-                  <td className="px-4 py-3 font-bold text-saffron-600">{s.total_points}</td>
+                  <td className="px-4 py-3 text-gray-600 text-xs">{teacherMeta.teacher1}</td>
+                  <td className="px-4 py-3 text-gray-600 text-xs">{teacherMeta.teacher2}</td>
+                  <td className="px-4 py-3 text-gray-600 text-xs">{teacherMeta.teacherMobile}</td>
                   <td className="px-4 py-3">
                     <div className="flex gap-2">
                       <button onClick={() => handleEdit(s)} className="text-blue-600 hover:underline text-xs font-semibold">{t('common.edit')}</button>

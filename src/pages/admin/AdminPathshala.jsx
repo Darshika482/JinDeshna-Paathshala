@@ -3,13 +3,14 @@ import { createPortal } from 'react-dom';
 import Papa from 'papaparse';
 import toast from 'react-hot-toast';
 import { usePathshalaStore } from '../../store/usePathshalaStore.js';
+import { normalizeAgeGroup } from '../../lib/formatters.js';
 import ConfirmDialog from '../../components/common/ConfirmDialog.jsx';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PATHSHALA_TYPES  = ['Daily', 'Weekly', 'Half-Yearly', 'Summer / Vacation-based'];
 const CLASS_OPTIONS    = ['Kids Group', 'Children Group', 'Senior Group'];
 const GENDER_OPTIONS   = ['Male', 'Female'];
-const AGE_GROUP_OPTIONS = ['2–5 yrs', '6–10 yrs', '11–15 yrs', '15–21 yrs'];
+const AGE_GROUP_OPTIONS = ['2-5 yrs', '6-10 yrs', '11-15 yrs', '15-21 yrs'];
 
 // ─── CSV helpers ──────────────────────────────────────────────────────────────
 const PAATHSHALA_CSV_HEADERS = [
@@ -61,9 +62,10 @@ function triggerDownload(filename, content, type = 'text/csv;charset=utf-8;') {
 // ─── Custom Select ─────────────────────────────────────────────────────────────
 // Renders the dropdown list via a React portal so it is never clipped by
 // overflow-hidden / overflow-auto ancestor containers inside modals.
+// Smart-flips above the trigger when there is not enough space below.
 function CustomSelect({ value, onChange, options, placeholder = 'Select…' }) {
   const [open, setOpen] = useState(false);
-  const [rect, setRect] = useState(null);
+  const [pos, setPos] = useState(null); // { top, left, width, openUp, maxHeight }
   const btnRef = useRef();
   const listRef = useRef();
 
@@ -78,9 +80,51 @@ function CustomSelect({ value, onChange, options, placeholder = 'Select…' }) {
     return () => document.removeEventListener('mousedown', fn);
   }, []);
 
+  useEffect(() => {
+    if (!open) return;
+    const onScrollOrResize = () => setOpen(false);
+    window.addEventListener('scroll', onScrollOrResize, true);
+    window.addEventListener('resize', onScrollOrResize);
+    return () => {
+      window.removeEventListener('scroll', onScrollOrResize, true);
+      window.removeEventListener('resize', onScrollOrResize);
+    };
+  }, [open]);
+
   const handleOpen = () => {
     if (!open && btnRef.current) {
-      setRect(btnRef.current.getBoundingClientRect());
+      const r = btnRef.current.getBoundingClientRect();
+      // Constrain to the nearest container (modal box uses overflow:hidden)
+      // so the dropdown never spills outside its visible parent.
+      let top = 8;
+      let bottom = window.innerHeight - 8;
+      let node = btnRef.current.parentElement;
+      while (node && node !== document.body) {
+        const cs = window.getComputedStyle(node);
+        if (
+          cs.overflow === 'hidden' || cs.overflowY === 'hidden' ||
+          cs.overflow === 'auto'   || cs.overflowY === 'auto'   ||
+          cs.position === 'fixed'
+        ) {
+          const nr = node.getBoundingClientRect();
+          if (nr.top    > top)    top    = nr.top + 4;
+          if (nr.bottom < bottom) bottom = nr.bottom - 4;
+        }
+        node = node.parentElement;
+      }
+
+      const desired = Math.min((options.length + 1) * 36 + 12, 260);
+      const spaceBelow = bottom - r.bottom - 6;
+      const spaceAbove = r.top - top - 6;
+      const openUp = spaceBelow < Math.min(desired, 160) && spaceAbove > spaceBelow;
+      const maxHeight = Math.max(120, Math.min(desired, openUp ? spaceAbove : spaceBelow));
+      setPos({
+        top: openUp ? r.top - maxHeight - 6 : r.bottom + 6,
+        left: r.left,
+        width: r.width,
+        openUp,
+        maxHeight,
+      });
     }
     setOpen(o => !o);
   };
@@ -96,25 +140,26 @@ function CustomSelect({ value, onChange, options, placeholder = 'Select…' }) {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
-      {open && rect && createPortal(
+      {open && pos && createPortal(
         <ul
           ref={listRef}
           style={{
             position: 'fixed',
-            top: rect.bottom + 4,
-            left: rect.left,
-            width: rect.width,
+            top: pos.top,
+            left: pos.left,
+            width: pos.width,
+            maxHeight: pos.maxHeight,
             zIndex: 9999,
           }}
-          className="bg-white border border-gray-200 rounded-lg shadow-2xl overflow-hidden"
+          className="bg-white border border-gray-200 rounded-lg shadow-xl ring-1 ring-black/5 overflow-y-auto py-1"
         >
           <li onClick={() => { onChange(''); setOpen(false); }}
-            className="px-3 py-2 text-sm text-gray-400 hover:bg-gray-50 cursor-pointer">{placeholder}</li>
+            className="px-3 py-1.5 text-sm text-gray-400 hover:bg-gray-50 cursor-pointer">{placeholder}</li>
           {options.map(opt => (
             <li key={opt} onClick={() => { onChange(opt); setOpen(false); }}
-              className={`px-3 py-2 text-sm cursor-pointer flex items-center gap-2 ${value === opt ? 'bg-forest-50 text-forest-700 font-semibold' : 'text-gray-700 hover:bg-gray-50'}`}>
-              {value === opt && <span className="text-forest-600">✓</span>}
-              {opt}
+              className={`px-3 py-1.5 text-sm cursor-pointer flex items-center gap-2 ${value === opt ? 'bg-forest-50 text-forest-700 font-semibold' : 'text-gray-700 hover:bg-gray-50'}`}>
+              <span className={`w-3 ${value === opt ? 'text-forest-600' : 'text-transparent'}`}>✓</span>
+              <span>{opt}</span>
             </li>
           ))}
         </ul>,
@@ -126,7 +171,7 @@ function CustomSelect({ value, onChange, options, placeholder = 'Select…' }) {
 
 // ─── Form helpers ─────────────────────────────────────────────────────────────
 const inp = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-forest-500 transition-colors';
-const ta  = inp + ' resize-none';
+const ta  = inp + ' resize-y';
 
 function Field({ label, required, children }) {
   return (
@@ -181,7 +226,7 @@ function PathshalaFormModal({ initial, onSave, onClose }) {
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[96vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-forest-800 to-forest-700 text-white flex-shrink-0">
           <div>
             <h2 className="font-bold text-lg">{initial ? 'Edit Pathshala' : 'Register New Pathshala'}</h2>
@@ -196,10 +241,10 @@ function PathshalaFormModal({ initial, onSave, onClose }) {
             <input className={inp} value={form.paathshala_name} onChange={e => set('paathshala_name', e.target.value)} placeholder="e.g. Shri Veetraag Vigyan Pathshala" />
           </Field>
           <Field label="Address / Location">
-            <textarea className={ta} rows={2} value={form.address} onChange={e => set('address', e.target.value)} />
+            <textarea className={`${ta} min-h-[90px]`} rows={3} value={form.address} onChange={e => set('address', e.target.value)} />
           </Field>
           <Field label="Description">
-            <textarea className={ta} rows={2} value={form.description} onChange={e => set('description', e.target.value)} />
+            <textarea className={`${ta} min-h-[140px]`} rows={6} value={form.description} onChange={e => set('description', e.target.value)} />
           </Field>
 
           <SectionHead>Primary Teacher / Instructor</SectionHead>
@@ -207,14 +252,14 @@ function PathshalaFormModal({ initial, onSave, onClose }) {
             <Field label="Teacher Name"><input className={inp} value={form.teacher1_name} onChange={e => set('teacher1_name', e.target.value)} /></Field>
             <Field label="Mobile"><input className={inp} type="tel" value={form.teacher1_mobile} onChange={e => set('teacher1_mobile', e.target.value)} /></Field>
           </div>
-          <Field label="Correspondence Address"><textarea className={ta} rows={2} value={form.teacher1_address} onChange={e => set('teacher1_address', e.target.value)} /></Field>
+          <Field label="Correspondence Address"><textarea className={`${ta} min-h-[90px]`} rows={3} value={form.teacher1_address} onChange={e => set('teacher1_address', e.target.value)} /></Field>
 
           <SectionHead>Secondary Teacher / Instructor</SectionHead>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Teacher Name"><input className={inp} value={form.teacher2_name} onChange={e => set('teacher2_name', e.target.value)} /></Field>
             <Field label="Mobile"><input className={inp} type="tel" value={form.teacher2_mobile} onChange={e => set('teacher2_mobile', e.target.value)} /></Field>
           </div>
-          <Field label="Correspondence Address"><textarea className={ta} rows={2} value={form.teacher2_address} onChange={e => set('teacher2_address', e.target.value)} /></Field>
+          <Field label="Correspondence Address"><textarea className={`${ta} min-h-[90px]`} rows={3} value={form.teacher2_address} onChange={e => set('teacher2_address', e.target.value)} /></Field>
 
           <SectionHead>Mandal Details</SectionHead>
           <div className="grid grid-cols-2 gap-3">
@@ -242,14 +287,14 @@ function PathshalaFormModal({ initial, onSave, onClose }) {
 
           <SectionHead>Student Count (Age-wise)</SectionHead>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[['students_2_5','2–5 yrs'],['students_6_10','6–10 yrs'],['students_11_15','11–15 yrs'],['students_15_21','15–21 yrs']].map(([k,l]) => (
+            {[['students_2_5','2-5 yrs'],['students_6_10','6-10 yrs'],['students_11_15','11-15 yrs'],['students_15_21','15-21 yrs']].map(([k,l]) => (
               <Field key={k} label={l}><input className={inp} type="number" min="0" value={form[k]} onChange={e => set(k, e.target.value)} placeholder="0" /></Field>
             ))}
           </div>
 
           <SectionHead>Additional Details</SectionHead>
-          <Field label="Other Details / Activities"><textarea className={ta} rows={2} value={form.other_details} onChange={e => set('other_details', e.target.value)} /></Field>
-          <Field label="Special Activities"><textarea className={ta} rows={2} value={form.special_activities} onChange={e => set('special_activities', e.target.value)} /></Field>
+          <Field label="Other Details / Activities"><textarea className={`${ta} min-h-[90px]`} rows={3} value={form.other_details} onChange={e => set('other_details', e.target.value)} /></Field>
+          <Field label="Special Activities"><textarea className={`${ta} min-h-[90px]`} rows={3} value={form.special_activities} onChange={e => set('special_activities', e.target.value)} /></Field>
         </form>
 
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 bg-gray-50 flex-shrink-0">
@@ -295,7 +340,7 @@ function AddStudentModal({ pathshala, onSave, onClose }) {
           mobile:      (r['Mobile Number']||r['Mobile']||'').trim(),
           gender:      (r['Gender']||'').trim(),
           age:          r['Age'] ? parseInt(r['Age']) : undefined,
-          age_group:   (r['Age Group']||'').trim(),
+          age_group:   normalizeAgeGroup(r['Age Group']||''),
           class_group: (r['Class Group']||'').trim(),
         })).filter(r => r.name);
         if (!rows.length) { toast.error('No valid rows found'); setCsvUploading(false); return; }
@@ -338,8 +383,8 @@ function AddStudentModal({ pathshala, onSave, onClose }) {
       });
       ws.getRow(1).height = 22;
 
-      ws.addRow(['Arham Jain',  'Vikram Jain', '9179105875', 'Male',   9,  '6–10 yrs',  'Children Group']);
-      ws.addRow(['Aarvi Jain',  'Sachin Jain', '7067514988', 'Female', 11, '11–15 yrs', 'Senior Group']);
+      ws.addRow(['Arham Jain',  'Vikram Jain', '9179105875', 'Male',   9,  '6-10 yrs',  'Children Group']);
+      ws.addRow(['Aarvi Jain',  'Sachin Jain', '7067514988', 'Female', 11, '11-15 yrs', 'Senior Group']);
 
       // Add real dropdown validations for rows 2–101 (100 student slots)
       for (let row = 2; row <= 101; row++) {
@@ -485,14 +530,216 @@ function AddStudentModal({ pathshala, onSave, onClose }) {
   );
 }
 
+// ─── Edit Student Modal ───────────────────────────────────────────────────────
+function EditStudentModal({ student, pathshala, onSave, onClose }) {
+  const [form, setForm] = useState({
+    name: student.name || '',
+    parent_name: student.parent_name || student.father_name || '',
+    mobile: student.mobile || '',
+    gender: student.gender || '',
+    age: student.age || '',
+    age_group: normalizeAgeGroup(student.batch || ''),
+    class_group: student.group || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.name.trim()) { toast.error('Student name is required'); return; }
+    setSaving(true);
+    await onSave(form);
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-forest-800 to-forest-700 text-white">
+          <div>
+            <h2 className="font-bold">Edit Student</h2>
+            <p className="text-xs text-forest-300 mt-0.5">
+              Roll No: <span className="font-mono font-bold">{student.roll_no}</span> · {pathshala.paathshala_name}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-white/70 hover:text-white text-xl">✕</button>
+        </div>
+
+        {(pathshala.teacher1_name || pathshala.teacher2_name) && (
+          <div className="mx-5 mt-3 flex items-start gap-2 px-3 py-2.5 bg-forest-50 border border-forest-200 rounded-xl text-sm">
+            <span className="text-base mt-0.5">👩‍🏫</span>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-bold text-forest-600 uppercase tracking-wide mb-0.5">Teacher accompanying this group</div>
+              <div className="font-semibold text-forest-900 truncate">
+                {pathshala.teacher1_name}
+                {pathshala.teacher1_mobile && <span className="font-normal text-forest-600 ml-2 text-xs">{pathshala.teacher1_mobile}</span>}
+              </div>
+              {pathshala.teacher2_name && (
+                <div className="text-forest-700 text-xs mt-0.5 truncate">
+                  Also: {pathshala.teacher2_name}
+                  {pathshala.teacher2_mobile && <span className="text-forest-500 ml-1">{pathshala.teacher2_mobile}</span>}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="p-5 space-y-3">
+          <Field label="Student Name" required>
+            <input className={inp} value={form.name} onChange={e => set('name', e.target.value)} autoFocus />
+          </Field>
+          <Field label="Father/Mother's Name">
+            <input className={inp} value={form.parent_name} onChange={e => set('parent_name', e.target.value)} />
+          </Field>
+          <Field label="Mobile Number">
+            <input className={inp} type="tel" value={form.mobile} onChange={e => set('mobile', e.target.value)} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Gender">
+              <CustomSelect value={form.gender} onChange={v => set('gender', v)} options={GENDER_OPTIONS} placeholder="Select…" />
+            </Field>
+            <Field label="Age">
+              <input className={inp} type="number" min="0" max="25" value={form.age} onChange={e => set('age', e.target.value)} placeholder="—" />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Age Group">
+              <CustomSelect value={form.age_group} onChange={v => set('age_group', v)} options={AGE_GROUP_OPTIONS} placeholder="Select…" />
+            </Field>
+            <Field label="Class Group">
+              <CustomSelect value={form.class_group} onChange={v => set('class_group', v)} options={CLASS_OPTIONS} placeholder="Select…" />
+            </Field>
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg border border-gray-300 text-sm hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={saving} className="px-5 py-2 rounded-lg bg-forest-700 text-white text-sm font-semibold hover:bg-forest-800 disabled:opacity-50">
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Delete Pathshala Modal ───────────────────────────────────────────────────
+function DeletePathshalaModal({ pathshala, studentCount, deleting, onDeleteOnly, onDeleteWithStudents, onClose }) {
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl fade-in border border-gray-100 overflow-hidden">
+        <div className="px-6 pt-5 pb-4 border-b border-gray-100 bg-gradient-to-r from-white to-gray-50">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-50 border border-red-200 text-red-600 flex items-center justify-center text-lg flex-shrink-0">⚠️</div>
+              <div>
+                <h3 className="text-2xl font-bold text-gray-900 leading-tight">Delete Pathshala</h3>
+                <p className="text-xs text-gray-500 mt-0.5">This action updates records immediately.</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={onClose}
+              className="w-8 h-8 rounded-full border border-gray-200 text-gray-400 hover:text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        <div className="px-6 py-5">
+          <div className="rounded-xl bg-gray-50 border border-gray-200 px-3 py-2.5 mb-4">
+            <div className="text-[11px] uppercase tracking-wide text-gray-500 font-semibold">Selected Pathshala</div>
+            <div className="text-sm font-semibold text-gray-900 mt-0.5">{pathshala.paathshala_name}</div>
+          </div>
+
+          <p className="text-gray-600 text-sm mb-1">Choose what should happen to linked students:</p>
+          {studentCount > 0 ? (
+            <p className="text-gray-500 text-sm mb-4">
+              <span className="font-semibold text-gray-800">{studentCount} student{studentCount !== 1 ? 's are' : ' is'}</span> currently linked.
+            </p>
+          ) : (
+            <p className="text-gray-500 text-sm mb-4">No students are linked to this pathshala.</p>
+          )}
+
+          <div className="space-y-3">
+            <div className="rounded-xl border border-forest-200 bg-forest-50/50 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 font-semibold text-forest-800">
+                    <span>🗂️</span>
+                    <span>Delete pathshala only</span>
+                  </div>
+                  <div className="text-xs text-forest-700/80 mt-1">
+                    {studentCount > 0
+                      ? 'Students remain in the system and are simply unlinked.'
+                      : 'Remove this pathshala record.'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={onDeleteOnly}
+                  className="px-3 py-2 rounded-lg bg-forest-700 text-white text-xs font-semibold hover:bg-forest-800 disabled:opacity-50 whitespace-nowrap"
+                >
+                  Continue
+                </button>
+              </div>
+            </div>
+
+            {studentCount > 0 && (
+              <div className="rounded-xl border border-red-300 bg-red-50 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 font-semibold text-red-700">
+                      <span>🗑️</span>
+                      <span>Delete pathshala and students</span>
+                    </div>
+                    <div className="text-xs text-red-600/90 mt-1">
+                      Permanently delete this pathshala and all {studentCount} linked student{studentCount !== 1 ? 's' : ''}.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={deleting}
+                    onClick={onDeleteWithStudents}
+                    className="px-3 py-2 rounded-lg bg-red-600 text-white text-xs font-semibold hover:bg-red-700 disabled:opacity-50 whitespace-nowrap"
+                  >
+                    Delete All
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-5 pt-4 border-t border-gray-100 flex items-center justify-between gap-2">
+            <p className="text-[11px] text-gray-400">{deleting ? 'Applying changes...' : 'No action is taken until you choose an option.'}</p>
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={onClose}
+              className="px-4 py-2.5 rounded-xl border border-gray-300 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function AdminPathshala() {
-  const { paathshalas, students, loading, fetchPathashalas, addPathshala, updatePathshala, deletePathshala, addStudentToPathshala } = usePathshalaStore();
+  const { paathshalas, students, loading, fetchPathashalas, addPathshala, updatePathshala, deletePathshala, addStudentToPathshala, updateStudent, deleteStudent } = usePathshalaStore();
   const [openCode, setOpenCode]         = useState(null);
   const [showForm, setShowForm]         = useState(false);
   const [editTarget, setEditTarget]     = useState(null);
   const [deleteId, setDeleteId]         = useState(null);
   const [addStudentsFor, setAddStudentsFor] = useState(null);
+  const [editStudentTarget, setEditStudentTarget] = useState(null); // { student, pathshala }
+  const [deleteStudentId, setDeleteStudentId] = useState(null);
+  const [deletingPathshala, setDeletingPathshala] = useState(false);
   const [csvUploading, setCsvUploading] = useState(false);
   const uploadRef = useRef();
 
@@ -612,17 +859,53 @@ export default function AdminPathshala() {
     }
   };
 
-  const handleDelete = async (id) => {
-    const r = await deletePathshala(id);
-    if (r.success) toast.success('Deleted');
-    else toast.error(r.error);
+  const handleDelete = async (deleteStudents = false) => {
+    if (!deleteId) return;
+    const target = paathshalas.find(p => p.id === deleteId);
+    setDeletingPathshala(true);
+    const r = await deletePathshala(deleteId, { deleteStudents });
+    setDeletingPathshala(false);
+    if (r.success) {
+      if (deleteStudents && r.deletedStudents) {
+        toast.success(`Pathshala deleted along with ${r.deletedStudents} student${r.deletedStudents !== 1 ? 's' : ''}`);
+      } else if (r.unlinkedStudents) {
+        toast.success(`Pathshala deleted. ${r.unlinkedStudents} student${r.unlinkedStudents !== 1 ? 's' : ''} kept and unlinked.`);
+      } else {
+        toast.success('Pathshala deleted');
+      }
+      if (target && openCode === target.paathshala_code) {
+        setOpenCode(null);
+      }
+    } else {
+      toast.error(r.error);
+    }
     setDeleteId(null);
   };
+
+  const deletePathshalaTarget = deleteId ? paathshalas.find(p => p.id === deleteId) : null;
+  const deletePathshalaStudentCount = deletePathshalaTarget
+    ? students.filter(s => s.paathshala_code === deletePathshalaTarget.paathshala_code).length
+    : 0;
 
   const handleAddStudent = async (form) => {
     const r = await addStudentToPathshala(addStudentsFor, form);
     if (r.success) toast.success(`Added! Roll No: ${r.rollNo}`);
     else toast.error(r.error);
+  };
+
+  const handleEditStudentSave = async (form) => {
+    if (!editStudentTarget) return;
+    const r = await updateStudent(editStudentTarget.student.id, form);
+    if (r.success) { toast.success('Student updated'); setEditStudentTarget(null); }
+    else toast.error(r.error || 'Update failed');
+  };
+
+  const handleDeleteStudent = async () => {
+    if (!deleteStudentId) return;
+    const r = await deleteStudent(deleteStudentId);
+    if (r.success) toast.success('Student deleted');
+    else toast.error(r.error || 'Delete failed');
+    setDeleteStudentId(null);
   };
 
   if (loading) {
@@ -688,7 +971,7 @@ export default function AdminPathshala() {
       {/* ── Empty state ───────────────────────────────────────────────────────── */}
       {paathshalas.length === 0 && (
         <div className="bg-white rounded-2xl border border-gray-200 p-10 text-center shadow-sm">
-          <div className="text-5xl mb-3">🕌</div>
+          <div className="text-5xl mb-3">🏫</div>
           <div className="font-bold text-gray-700 text-lg mb-1">No Paathshalas Registered</div>
           <div className="text-sm text-gray-500 mb-4">Register manually or upload the CSV template above</div>
           <button onClick={() => setShowForm(true)}
@@ -805,46 +1088,65 @@ export default function AdminPathshala() {
                         No students yet — click <strong>+ Add Students</strong> above.
                       </div>
                     ) : (
-                      <div className="space-y-1.5">
+                      <div className="space-y-2">
                         {myStudents.map(s => (
                           <div key={s.id}
-                            className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 bg-slate-50 rounded-xl border border-gray-100 text-sm">
-                            {/* Roll No */}
-                            <span className="font-mono font-bold text-forest-700 text-xs w-10 flex-shrink-0">{s.roll_no || '—'}</span>
-                            {/* Name */}
-                            <span className="font-semibold text-gray-900 min-w-[120px]">{s.name}</span>
-                            {/* Parent */}
-                            {(s.parent_name || s.father_name) && (
-                              <span className="text-xs text-gray-500 flex items-center gap-1">
-                                <span>👤</span>{s.parent_name || s.father_name}
-                              </span>
-                            )}
-                            {/* Mobile */}
-                            {s.mobile && (
-                              <span className="text-xs text-gray-500 flex items-center gap-1">
-                                <span>📱</span>{s.mobile}
-                              </span>
-                            )}
-                            {/* Gender */}
-                            {s.gender && (
-                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                                /^m/i.test(s.gender) ? 'bg-blue-50 text-blue-600' : 'bg-pink-50 text-pink-600'
-                              }`}>{s.gender}</span>
-                            )}
-                            {/* Age */}
-                            {s.age && <span className="text-xs text-gray-500">{s.age} yrs</span>}
-                            {/* Age Group (stored in batch) */}
-                            {s.batch && (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 font-medium">{s.batch}</span>
-                            )}
-                            {/* Class Group */}
-                            {s.group && (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-forest-50 text-forest-700 font-medium">{s.group}</span>
-                            )}
-                            {/* Points */}
-                            {Number(s.total_points) > 0 && (
-                              <span className="ml-auto font-bold text-saffron-600 text-xs flex-shrink-0">⭐ {s.total_points}</span>
-                            )}
+                            className="rounded-xl border border-gray-200 bg-white px-3 py-3 shadow-sm">
+                            <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="font-mono font-bold text-forest-700 text-xs px-2 py-1 rounded-lg bg-forest-50 border border-forest-100">
+                                    {s.roll_no || '—'}
+                                  </span>
+                                  <span className="font-semibold text-gray-900 truncate">{s.name}</span>
+                                </div>
+                                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+                                  <span className="flex items-center gap-1">
+                                    <span>👤</span>
+                                    <span className="truncate max-w-[200px]">{s.parent_name || s.father_name || 'No parent name'}</span>
+                                  </span>
+                                  <span className="flex items-center gap-1">
+                                    <span>📱</span>
+                                    <span>{s.mobile || 'No mobile'}</span>
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-1.5 md:justify-end">
+                                {s.gender && (
+                                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                    /^m/i.test(s.gender) ? 'bg-blue-50 text-blue-600' : 'bg-pink-50 text-pink-600'
+                                  }`}>{s.gender}</span>
+                                )}
+                                {s.age && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{s.age} yrs</span>}
+                                {s.batch && (
+                                  <span className="text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 font-medium">{normalizeAgeGroup(s.batch)}</span>
+                                )}
+                                {s.group && (
+                                  <span className="text-xs px-2 py-0.5 rounded-full bg-forest-50 text-forest-700 font-medium">{s.group}</span>
+                                )}
+                                {Number(s.total_points) > 0 && (
+                                  <span className="text-xs px-2 py-0.5 rounded-full bg-saffron-50 text-saffron-700 font-bold">⭐ {s.total_points}</span>
+                                )}
+                              </div>
+
+                              <div className="md:ml-1 flex items-center gap-1.5 flex-shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={e => { e.stopPropagation(); setEditStudentTarget({ student: s, pathshala: p }); }}
+                                  className="px-2.5 py-1 rounded-lg border border-blue-200 text-blue-600 text-xs font-semibold hover:bg-blue-50 transition-colors"
+                                >
+                                  Edit
+                                </button>
+                              <button
+                                type="button"
+                                onClick={e => { e.stopPropagation(); setDeleteStudentId(s.id); }}
+                                className="px-2.5 py-1 rounded-lg border border-red-200 text-red-500 text-xs font-semibold hover:bg-red-50 transition-colors"
+                              >
+                                Delete
+                              </button>
+                              </div>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -872,13 +1174,33 @@ export default function AdminPathshala() {
           onClose={() => setAddStudentsFor(null)}
         />
       )}
-      {deleteId && (
-        <ConfirmDialog
-          message="Delete this pathshala? Students will not be removed."
-          onConfirm={() => handleDelete(deleteId)}
-          onCancel={() => setDeleteId(null)}
+      {deletePathshalaTarget && (
+        <DeletePathshalaModal
+          pathshala={deletePathshalaTarget}
+          studentCount={deletePathshalaStudentCount}
+          deleting={deletingPathshala}
+          onDeleteOnly={() => handleDelete(false)}
+          onDeleteWithStudents={() => handleDelete(true)}
+          onClose={() => !deletingPathshala && setDeleteId(null)}
         />
       )}
+      {editStudentTarget && (
+        <EditStudentModal
+          student={editStudentTarget.student}
+          pathshala={editStudentTarget.pathshala}
+          onSave={handleEditStudentSave}
+          onClose={() => setEditStudentTarget(null)}
+        />
+      )}
+      <ConfirmDialog
+        open={!!deleteStudentId}
+        title="Delete Student?"
+        message="Delete this student? This action cannot be undone."
+        danger
+        confirmLabel="Delete"
+        onConfirm={handleDeleteStudent}
+        onCancel={() => setDeleteStudentId(null)}
+      />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { useTransactionStore } from '../../store/useTransactionStore.js';
 import { usePathshalaStore } from '../../store/usePathshalaStore.js';
 import { supabase } from '../../lib/supabase.js';
 import { getCampDayForDate } from '../../lib/campDates.js';
+import { normalizeAgeGroup } from '../../lib/formatters.js';
 import Select from '../../components/common/Select.jsx';
 import MultiCheckSelect from '../../components/common/MultiCheckSelect.jsx';
 
@@ -164,7 +165,7 @@ function StudentDetailModal({ student, onClose }) {
           <div className="min-w-0">
             <div className="font-bold text-gray-900 text-lg leading-tight truncate">{student.name}</div>
             <div className="text-xs text-gray-500 mt-0.5">
-              {[student.batch, student.class && `Class ${student.class}`, student.room_no && `Room ${student.room_no}`, student.group].filter(Boolean).join(' • ')}
+              {[normalizeAgeGroup(student.batch), student.class && `Class ${student.class}`, student.room_no && `Room ${student.room_no}`, student.group].filter(Boolean).join(' • ')}
             </div>
           </div>
           <div className="flex items-center gap-3 flex-shrink-0 ml-3">
@@ -538,7 +539,7 @@ export default function AdminLeaderboard() {
       return { ...s, rank: i + 1, category };
     });
 
-  const batches  = ['All', ...[...new Set(leaderboard.map(s => s.batch).filter(Boolean))].sort(naturalSort)];
+  const batches  = ['All', ...[...new Set(leaderboard.map(s => normalizeAgeGroup(s.batch)).filter(Boolean))].sort(naturalSort)];
   const classes  = ['All', ...[...new Set(leaderboard.map(s => s.class).filter(Boolean))].sort(naturalSort)];
   const rooms    = ['All', ...[...new Set(leaderboard.map(s => s.room_no).filter(Boolean))].sort(naturalSort)];
   const groups   = ['All', ...[...new Set(leaderboard.map(s => s.group).filter(Boolean))].sort(naturalSort)];
@@ -554,7 +555,7 @@ export default function AdminLeaderboard() {
       normalize(String(s.roll_no || '')).includes(q) ||
       normalizeRoll(s.roll_no).includes(qRoll)
     ) &&
-    (filterBatch  === 'All' || s.batch === filterBatch) &&
+    (filterBatch  === 'All' || normalizeAgeGroup(s.batch) === filterBatch) &&
     (filterClass  === 'All' || s.class === filterClass) &&
     (filterRoom   === 'All' || s.room_no === filterRoom) &&
     (filterGroup  === 'All' || s.group === filterGroup) &&
@@ -607,7 +608,7 @@ export default function AdminLeaderboard() {
         <div className="space-y-3">
           {pathshalaRankings.length === 0 ? (
             <div className="text-center py-16 text-gray-400 bg-white rounded-2xl border border-gray-200">
-              <div className="text-4xl mb-2">🕌</div>
+              <div className="text-4xl mb-2">🏫</div>
               <div className="text-sm">No Paathshalas registered yet</div>
             </div>
           ) : (
@@ -725,7 +726,7 @@ export default function AdminLeaderboard() {
             size="sm"
             value={filterClass}
             onChange={setFilterClass}
-            options={filterBatch === 'All' ? classes : ['All', ...classes.filter(c => c === 'All' || leaderboard.some(s => s.batch === filterBatch && s.class === c))]}
+            options={filterBatch === 'All' ? classes : ['All', ...classes.filter(c => c === 'All' || leaderboard.some(s => normalizeAgeGroup(s.batch) === filterBatch && s.class === c))]}
           />
         </div>
         <div className="w-full sm:w-28">
@@ -779,7 +780,7 @@ export default function AdminLeaderboard() {
 
             <div className="mt-2 flex flex-wrap gap-1.5">
               <span className="bg-forest-100 text-forest-700 px-2 py-0.5 rounded-full text-[11px] font-semibold">
-                {s.batch || 'No Batch'}
+                {normalizeAgeGroup(s.batch) || 'No Batch'}
               </span>
               <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${CATEGORY_COLORS[s.category]}`}>
                 {t(`admin.category.${s.category.toLowerCase().replace('-', '')}`) || s.category}
@@ -835,7 +836,7 @@ export default function AdminLeaderboard() {
                   <td className="px-4 py-3 font-semibold text-gray-900">{s.name}</td>
                   <td className="px-4 py-3 text-gray-700">{s.class}</td>
                   <td className="px-4 py-3">
-                    <span className="bg-forest-100 text-forest-700 px-2 py-0.5 rounded-full text-xs font-semibold">{s.batch}</span>
+                    <span className="bg-forest-100 text-forest-700 px-2 py-0.5 rounded-full text-xs font-semibold">{normalizeAgeGroup(s.batch)}</span>
                   </td>
                   <td className="px-4 py-3">
                     {s.room_no ? <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full text-xs font-semibold">{s.room_no}</span> : <span className="text-gray-400">—</span>}

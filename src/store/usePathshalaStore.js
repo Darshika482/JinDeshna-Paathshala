@@ -70,13 +70,39 @@ export const usePathshalaStore = create(
         return { success: true };
       },
 
-      deletePathshala: async (id) => {
+      deletePathshala: async (id, { deleteStudents = false } = {}) => {
+        const pathshala = get().paathshalas.find(p => p.id === id);
+        if (!pathshala) return { success: false, error: 'Pathshala not found' };
+
+        const code = pathshala.paathshala_code;
+        const linked = get().students.filter(s => s.paathshala_code === code);
+
+        if (deleteStudents && linked.length) {
+          const { error: studentError } = await supabase
+            .from('students')
+            .delete()
+            .eq('paathshala_code', code);
+          if (studentError) return { success: false, error: studentError.message };
+        } else if (linked.length) {
+          const { error: unlinkError } = await supabase
+            .from('students')
+            .update({ paathshala_code: null, pathshala: null })
+            .eq('paathshala_code', code);
+          if (unlinkError) return { success: false, error: unlinkError.message };
+        }
+
         const { error } = await supabase.from('paathshalas').delete().eq('id', id);
         if (error) return { success: false, error: error.message };
+
         set(state => ({
           paathshalas: state.paathshalas.filter(p => p.id !== id),
+          students: state.students.filter(s => s.paathshala_code !== code),
         }));
-        return { success: true };
+        return {
+          success: true,
+          deletedStudents: deleteStudents ? linked.length : 0,
+          unlinkedStudents: deleteStudents ? 0 : linked.length,
+        };
       },
 
       addStudentToPathshala: async (pathshala, studentData) => {
@@ -151,6 +177,25 @@ export const usePathshalaStore = create(
         const { error } = await supabase.from('students').delete().eq('id', studentId);
         if (error) return { success: false, error: error.message };
         set(state => ({ students: state.students.filter(s => s.id !== studentId) }));
+        return { success: true };
+      },
+
+      updateStudent: async (studentId, updates) => {
+        const payload = {
+          name: updates.name,
+          parent_name: updates.parent_name,
+          father_name: updates.parent_name,
+          mobile: updates.mobile,
+          gender: updates.gender || null,
+          age: updates.age ? parseInt(updates.age) : null,
+          batch: updates.age_group || '',
+          group: updates.class_group || '',
+        };
+        const { error } = await supabase.from('students').update(payload).eq('id', studentId);
+        if (error) return { success: false, error: error.message };
+        set(state => ({
+          students: state.students.map(s => s.id === studentId ? { ...s, ...payload } : s),
+        }));
         return { success: true };
       },
     }),
