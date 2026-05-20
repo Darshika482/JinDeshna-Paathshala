@@ -4,13 +4,11 @@ import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase.js';
 import { useVolunteerStore } from '../../store/useVolunteerStore.js';
-import { useStudentStore } from '../../store/useStudentStore.js';
 import { useScheduleStore } from '../../store/useScheduleStore.js';
+import { useConfigStore, DEFAULT_BATCH_CLASSES } from '../../store/useConfigStore.js';
 import Select from '../../components/common/Select.jsx';
 import ConfirmDialog from '../../components/common/ConfirmDialog.jsx';
 import { buildWhatsAppLink } from '../../lib/whatsapp.js';
-import { CLASS_TEACHER_NAMES } from '../../lib/classTeachers.js';
-import { useConfigStore, DEFAULT_BATCH_CLASSES } from '../../store/useConfigStore.js';
 
 // Open WhatsApp with a pre-filled login PIN message for this volunteer.
 // Surface a clear toast if mobile or PIN is missing.
@@ -86,6 +84,19 @@ function toDutyKey(label) {
 
 function normalizeClassCode(value) {
   return String(value || '').toUpperCase().replace(/\s+/g, '');
+}
+
+function classNamesFromEvent(eventName) {
+  const raw = String(eventName || '').trim();
+  if (!raw) return [];
+
+  // If event name contains explicit class codes, prefer those.
+  const upper = raw.toUpperCase();
+  const codeMatches = upper.match(/\b\d+[A-Z]\b/g);
+  if (codeMatches?.length) return codeMatches.map(normalizeClassCode);
+
+  // Otherwise treat the class event name itself as assignable text.
+  return [raw];
 }
 
 function BoardActionIconButton({ title, onClick, children, tone = 'default' }) {
@@ -183,9 +194,8 @@ const AVAIL_COLORS = {
 export default function AdminVolunteers() {
   const { t } = useTranslation();
   const { volunteers, addVolunteer, updateVolunteer, deleteVolunteer, importFromCSV } = useVolunteerStore();
-  const { students } = useStudentStore();
   const { schedule } = useScheduleStore();
-  const batchClasses = useConfigStore(s => s.batchClasses) || DEFAULT_BATCH_CLASSES;
+  const configuredBatchClasses = useConfigStore(s => s.batchClasses) || DEFAULT_BATCH_CLASSES;
 
   const [classSessionEvents, setClassSessionEvents] = useState([]);
   const [dbEvents, setDbEvents] = useState([]);
@@ -214,6 +224,15 @@ export default function AdminVolunteers() {
         ev.time_slot ? `${ev.name} (${ev.time_slot})` : ev.name,
       ]))
     : DEFAULT_sessionLabels;
+
+  // Extract class options from Operations -> Events (event_type = "class").
+  // Supports both code-style names ("1A", "Class 2B") and free names
+  // ("Class Morning", "Junior Batch").
+  const eventClassCodes = [...new Set(
+    classSessionEvents
+      .flatMap((ev) => classNamesFromEvent(ev?.name))
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 
   // Duty areas derived from Operations → Events (auto-synced, non-editable on this page)
   const EVENT_TYPE_BOARD_META = {
@@ -390,28 +409,10 @@ export default function AdminVolunteers() {
     if (classSetupLoading) return;
     setClassSetupLoading(true);
     try {
-      const discoveredClasses = new Set(
-        [
-          ...Object.keys(CLASS_TEACHER_NAMES || {}),
-          ...(students || []).map(s => normalizeClassCode(s?.class)),
-          ...volunteers.flatMap((v) => {
-            const sessionClasses = parseSessionClasses(v.session_classes, sessionKeys);
-            const fromSessions = sessionKeys.map(k => normalizeClassCode(sessionClasses[k]));
-            const fromAssignedList = Array.isArray(v.assigned_classes)
-              ? v.assigned_classes.map(normalizeClassCode)
-              : [];
-            const fromPrimary = [normalizeClassCode(v.assigned_class)];
-            return [...fromSessions, ...fromAssignedList, ...fromPrimary];
-          }),
-        ].filter(Boolean)
-      );
-
-      const classCodes = [...discoveredClasses].sort((a, b) =>
-        a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
-      );
+      const classCodes = eventClassCodes;
 
       if (classCodes.length === 0) {
-        toast.error('No classes found to create boards.');
+        toast.error('No class codes found in active class events.');
         return;
       }
 
@@ -419,14 +420,21 @@ export default function AdminVolunteers() {
       const existingByKey = new Set(dutyAreas.map(a => a.key));
       const nextDutyAreas = [...dutyAreas];
       classCodes.forEach((classCode, idx) => {
-        const key = `class_${classCode.toLowerCase()}`;
+        const key = `class_${normalizeClassCode(classCode).toLowerCase()}`;
+        const displayClassLabel = /^class\b/i.test(String(classCode).trim())
+          ? String(classCode).trim()
+          : `Class ${classCode}`;
         const board = {
           key,
           emoji: '📚',
-          label: `Class ${classCode}`,
-          stdText: `📚 Class ${classCode} Mentor`,
+          label: displayClassLabel,
+          stdText: `📚 ${displayClassLabel} Mentor`,
           color: CLASS_BOARD_COLOR_OPTIONS[idx % CLASS_BOARD_COLOR_OPTIONS.length],
-          aliases: [`class ${classCode.toLowerCase()}`, `kaksha ${classCode.toLowerCase()}`],
+          aliases: [
+            `class ${String(classCode).toLowerCase()}`,
+            `kaksha ${String(classCode).toLowerCase()}`,
+            String(classCode).toLowerCase(),
+          ],
         };
         classBoardByCode[classCode] = board;
         if (!existingByKey.has(key)) {
@@ -793,11 +801,12 @@ export default function AdminVolunteers() {
       .filter((a, idx, arr) => arr.findIndex(x => x.value === a.value) === idx),
   ];
 
-  const classOptions = [...new Set([
-    ...Object.values(batchClasses).flat(),
-    ...Object.keys(CLASS_TEACHER_NAMES),
-    ...(students || []).map(s => String(s.class || '').trim()).filter(Boolean),
-  ])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  const classOptions = [...new Set(
+    Object.values(configuredBatchClasses)
+      .flat()
+      .map(normalizeClassCode)
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
 
   const filteredVols = volunteers.filter(v => {
     if (filterRole !== 'All' && !(v.roles || []).includes(filterRole)) return false;
@@ -1424,7 +1433,7 @@ export default function AdminVolunteers() {
                   </div>
                   {classOptions.length === 0 ? (
                     <div className="text-xs text-gray-400 p-3 rounded-xl border border-dashed border-gray-200">
-                      No student classes found yet. Import students first.
+                      No classes found. Add classes in Operations {'>'} Classes first.
                     </div>
                   ) : (
                     <div className="space-y-2">

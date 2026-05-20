@@ -6,11 +6,8 @@ import LanguageToggle from '../../components/common/LanguageToggle.jsx';
 import OfflineBanner from '../../components/common/OfflineBanner.jsx';
 import AdminDashboard from './AdminDashboard.jsx';
 import AdminLeaderboard from './AdminLeaderboard.jsx';
-import AdminSchedule from './AdminSchedule.jsx';
-import AdminCoinAllocation from './AdminCoinAllocation.jsx';
 import AdminTransactions from './AdminTransactions.jsx';
 import AdminVolunteers from './AdminVolunteers.jsx';
-import AdminCoinRegister from './AdminCoinRegister.jsx';
 import AdminCheckInRecords from './AdminCheckInRecords.jsx';
 import AdminOperations from './AdminOperations.jsx';
 import AdminClasses from './AdminClasses.jsx';
@@ -23,11 +20,8 @@ const NAV_ITEMS = [
   { key: 'checkIn',       icon: '✅', label: 'admin.checkIn' },
   { key: 'classes',       icon: '🏫', label: 'admin.pathshala' },
   { key: 'leaderboard',   icon: '🏆', label: 'admin.leaderboard' },
-  { key: 'schedule',      icon: '📅', label: 'admin.schedule' },
-  { key: 'coinAllocation',icon: '🪙', label: 'admin.coinAllocation' },
   { key: 'transactions',  icon: '📝', label: 'admin.transactions' },
   { key: 'volunteers',    icon: '🙋', label: 'admin.volunteers' },
-  { key: 'coinRegister',  icon: '📒', label: 'admin.coinRegister' },
   { key: 'operations',    icon: '⚙️', label: 'admin.operations' },
   { key: 'settings',      icon: '🔧', label: 'admin.settings' },
 ];
@@ -37,11 +31,8 @@ const PAGES = {
   checkIn:       AdminCheckInRecords,
   classes:       AdminPathshala,
   leaderboard:   AdminLeaderboard,
-  schedule:      AdminSchedule,
-  coinAllocation:AdminCoinAllocation,
   transactions:  AdminTransactions,
   volunteers:    AdminVolunteers,
-  coinRegister:  AdminCoinRegister,
   operations:    AdminOperations,
   settings:      AdminSettings,
 };

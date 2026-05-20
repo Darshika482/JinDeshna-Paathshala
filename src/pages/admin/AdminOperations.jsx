@@ -28,6 +28,49 @@ const GOOD_BEHAVIOUR_TYPES = [
 const EMPTY_EVENT = { name: '', time_slot: '', event_type: 'daily', applicable_gender: 'all', coin_pool_boys: 0, coin_pool_girls: 0, points_per_coin: 5, responsible_role: 'mentor', notes: '', is_active: true, sort_order: 0 };
 const EMPTY_RESP  = { responsibility_text: '', applies_to_role: 'mentor', notes: '' };
 
+function to12Hour(time24) {
+  const [hh, mm] = String(time24 || '').split(':').map(Number);
+  if (Number.isNaN(hh) || Number.isNaN(mm)) return '';
+  const suffix = hh >= 12 ? 'PM' : 'AM';
+  const h12 = ((hh + 11) % 12) + 1;
+  return `${h12}:${String(mm).padStart(2, '0')} ${suffix}`;
+}
+
+function to24Hour(hh, mm, ampm) {
+  let h = Number(hh);
+  const m = Number(mm);
+  if (Number.isNaN(h) || Number.isNaN(m)) return '';
+  const up = String(ampm || 'AM').toUpperCase();
+  if (up === 'PM' && h !== 12) h += 12;
+  if (up === 'AM' && h === 12) h = 0;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function buildTimeSlot(from, to) {
+  if (!from || !to) return '';
+  return `${to12Hour(from)}-${to12Hour(to)}`;
+}
+
+function parseTimeSlotRange(slot) {
+  const raw = String(slot || '').trim();
+  if (!raw) return { from: '', to: '' };
+
+  // Supports patterns like:
+  // "5:15-6:00 AM", "5:15 AM - 6:00 AM", "05:15 PM - 06:00 PM"
+  const m = raw.match(
+    /^(\d{1,2}):(\d{2})\s*([AP]M)?\s*[-–]\s*(\d{1,2}):(\d{2})\s*([AP]M)?$/i
+  );
+  if (!m) return { from: '', to: '' };
+
+  const [, h1, min1, ap1, h2, min2, ap2] = m;
+  const ampm1 = (ap1 || ap2 || 'AM').toUpperCase();
+  const ampm2 = (ap2 || ap1 || ampm1).toUpperCase();
+  return {
+    from: to24Hour(h1, min1, ampm1),
+    to: to24Hour(h2, min2, ampm2),
+  };
+}
+
 // ── Data hook ──────────────────────────────────────────────────────────────────
 
 function useOperationsData() {
@@ -81,12 +124,28 @@ function useOperationsData() {
 
 function EventForm({ initial, onSave, onCancel }) {
   const [form, setForm] = useState({ ...EMPTY_EVENT, ...initial });
+  const parsedSlot = parseTimeSlotRange(initial?.time_slot);
+  const [timeFrom, setTimeFrom] = useState(parsedSlot.from);
+  const [timeTo, setTimeTo] = useState(parsedSlot.to);
   const [saving, setSaving] = useState(false);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
+  useEffect(() => {
+    if (!timeFrom || !timeTo) return;
+    set('time_slot', buildTimeSlot(timeFrom, timeTo));
+  }, [timeFrom, timeTo]);
+
   async function handleSave() {
     if (!form.name.trim()) { toast.error('Event name is required.'); return; }
+    if ((timeFrom && !timeTo) || (!timeFrom && timeTo)) {
+      toast.error('Please set both start and end times.');
+      return;
+    }
+    if (timeFrom && timeTo && timeFrom >= timeTo) {
+      toast.error('End time must be after start time.');
+      return;
+    }
     setSaving(true);
     try {
       await onSave(form);
@@ -104,11 +163,41 @@ function EventForm({ initial, onSave, onCancel }) {
         </div>
         <div>
           <label className="text-xs text-gray-500 font-medium">Time Slot</label>
-          <input className="form-input mt-1" value={form.time_slot} onChange={e => set('time_slot', e.target.value)} placeholder="e.g. 5:15–6:00 AM" />
+          <div className="mt-1 p-3 rounded-xl border border-gray-200 bg-white space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <label className="text-xs text-gray-500">
+                <span className="block mb-1">🕒 Start</span>
+                <input
+                  type="time"
+                  className="form-input"
+                  value={timeFrom}
+                  onChange={e => setTimeFrom(e.target.value)}
+                  aria-label="Time from"
+                />
+              </label>
+              <label className="text-xs text-gray-500">
+                <span className="block mb-1">🕘 End</span>
+                <input
+                  type="time"
+                  className="form-input"
+                  value={timeTo}
+                  onChange={e => setTimeTo(e.target.value)}
+                  aria-label="Time to"
+                />
+              </label>
+            </div>
+            <div className="text-xs text-gray-500">
+              Slot Preview:{' '}
+              <span className="font-semibold text-forest-700">
+                {buildTimeSlot(timeFrom, timeTo) || form.time_slot || 'Not set'}
+              </span>
+            </div>
+          </div>
         </div>
         <div>
           <label className="text-xs text-gray-500 font-medium">Event Type</label>
           <select className="form-input mt-1" value={form.event_type} onChange={e => set('event_type', e.target.value)}>
+            <option value="class">Class</option>
             <option value="daily">Daily</option>
             <option value="one-time">One-Time</option>
             <option value="two-day">Two-Day</option>
