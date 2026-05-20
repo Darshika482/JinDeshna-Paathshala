@@ -16,6 +16,7 @@ import AdminCheckInRecords from './AdminCheckInRecords.jsx';
 import AdminOperations from './AdminOperations.jsx';
 import AdminClasses from './AdminClasses.jsx';
 import AdminSettings from './AdminSettings.jsx';
+import AdminPathshala from './AdminPathshala.jsx';
 import { useConfigStore } from '../../store/useConfigStore.js';
 
 const NAV_ITEMS = [
@@ -23,6 +24,7 @@ const NAV_ITEMS = [
   { key: 'checkIn',       icon: '✅', label: 'admin.checkIn' },
   { key: 'students',      icon: '👥', label: 'admin.students' },
   { key: 'classes',       icon: '🏫', label: 'admin.classes' },
+  { key: 'pathshala',    icon: '🕌', label: 'admin.pathshala' },
   { key: 'leaderboard',   icon: '🏆', label: 'admin.leaderboard' },
   { key: 'schedule',      icon: '📅', label: 'admin.schedule' },
   { key: 'coinAllocation',icon: '🪙', label: 'admin.coinAllocation' },
@@ -38,6 +40,7 @@ const PAGES = {
   checkIn:       AdminCheckInRecords,
   students:      AdminStudents,
   classes:       AdminClasses,
+  pathshala:     AdminPathshala,
   leaderboard:   AdminLeaderboard,
   schedule:      AdminSchedule,
   coinAllocation:AdminCoinAllocation,
