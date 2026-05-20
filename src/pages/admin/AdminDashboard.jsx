@@ -3,6 +3,7 @@ import { useStudentStore } from '../../store/useStudentStore.js';
 import { useTransactionStore } from '../../store/useTransactionStore.js';
 import { useCoinStore } from '../../store/useCoinStore.js';
 import { useScheduleStore } from '../../store/useScheduleStore.js';
+import { usePathshalaStore } from '../../store/usePathshalaStore.js';
 import ActivitySummaryCard from '../../components/common/ActivitySummaryCard.jsx';
 
 export default function AdminDashboard() {
@@ -11,9 +12,19 @@ export default function AdminDashboard() {
   const { transactions, currentDay } = useTransactionStore();
   const { getStats } = useCoinStore();
   const { getActivitiesForDay } = useScheduleStore();
+  const { paathshalas, students: pathshalaStudents } = usePathshalaStore();
 
   const stats = getStats();
   const todayTx = transactions.filter(tx => tx.day === currentDay);
+
+  // Paathshala rankings: sum each school's student points
+  const pathshalaRankings = paathshalas
+    .map(p => {
+      const myStudents = pathshalaStudents.filter(s => s.paathshala_code === p.paathshala_code);
+      const totalPoints = myStudents.reduce((sum, s) => sum + (Number(s.total_points) || 0), 0);
+      return { ...p, totalPoints, studentCount: myStudents.length };
+    })
+    .sort((a, b) => b.totalPoints - a.totalPoints);
   const pointsToday = todayTx.filter(tx => tx.points > 0).reduce((s, tx) => s + tx.points, 0);
   const specialToday = getActivitiesForDay(currentDay).filter(a => a.type === 'special').length;
   const checkedInGirls = students.filter(s => s.checked_in && String(s.gender || '').toLowerCase() === 'girl').length;
@@ -134,6 +145,45 @@ export default function AdminDashboard() {
           ))}
         </div>
       </div>
+
+      {/* Paathshala Performance */}
+      {pathshalaRankings.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-slate-900">🏫 Paathshala Rankings</h3>
+            <span className="text-xs text-slate-500">{pathshalaRankings.length} competing</span>
+          </div>
+          <div className="space-y-2">
+            {pathshalaRankings.map((p, idx) => {
+              const maxPts = pathshalaRankings[0]?.totalPoints || 1;
+              const pct = maxPts > 0 ? (p.totalPoints / maxPts) * 100 : 0;
+              const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : null;
+              return (
+                <div key={p.id} className="flex items-center gap-3">
+                  <div className="w-8 text-center text-lg flex-shrink-0">
+                    {medal || <span className="text-sm font-mono text-slate-400">#{idx + 1}</span>}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="font-medium text-sm text-slate-900 truncate">{p.paathshala_name}</div>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <span className="text-xs text-slate-500">{p.studentCount} students</span>
+                        <span className="font-bold text-saffron-600 text-sm">{p.totalPoints} pts</span>
+                      </div>
+                    </div>
+                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-saffron-500 to-saffron-400 transition-all"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
