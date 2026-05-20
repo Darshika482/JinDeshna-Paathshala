@@ -577,6 +577,46 @@ function PathshalaDetail({ pathshala, students, onBack, onEdit }) {
     else toast.error(result.error || 'Import failed');
   };
 
+  const handleImportFile = async (file) => {
+    if (!file) return;
+    const isXlsx = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
+    if (isXlsx) {
+      try {
+        const ExcelJS = (await import('exceljs')).default;
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.load(await file.arrayBuffer());
+        const ws = wb.worksheets[0];
+        const rows = [];
+        ws.eachRow((row, idx) => {
+          if (idx === 1) return;
+          const v = row.values;
+          const name = String(v[1] ?? '').trim();
+          if (!name) return;
+          rows.push({ name, parent_name: String(v[2]??'').trim(), mobile: String(v[3]??'').trim(), gender: String(v[4]??'').trim(), age: v[5] ? parseInt(v[5]) : undefined, age_group: String(v[6]??'').trim(), class_group: String(v[7]??'').trim() });
+        });
+        if (!rows.length) { toast.error('No student rows found'); return; }
+        handleImport(await importStudentsFromCSV(pathshala, rows));
+      } catch (e) { toast.error('Could not read xlsx: ' + e.message); }
+      return;
+    }
+    Papa.parse(file, {
+      header: true, skipEmptyLines: true,
+      complete: async ({ data }) => {
+        const rows = data.map(r => ({
+          name:        (r['Student Name']||r['Name']||r['name']||'').trim(),
+          parent_name: (r["Father/Mother's Name"]||r['Father Name']||r['Parent Name']||'').trim(),
+          mobile:      (r['Mobile Number']||r['Mobile']||'').trim(),
+          gender:      (r['Gender']||'').trim(),
+          age:          r['Age'] ? parseInt(r['Age']) : undefined,
+          age_group:   (r['Age Group']||'').trim(),
+          class_group: (r['Class Group']||'').trim(),
+        })).filter(r => r.name);
+        if (!rows.length) { toast.error('No valid rows found'); return; }
+        handleImport(await importStudentsFromCSV(pathshala, rows));
+      },
+    });
+  };
+
   const handleDeleteStudent = async (id) => {
     const r = await deleteStudent(id);
     if (r.success) toast.success('Student removed');
@@ -590,6 +630,51 @@ function PathshalaDetail({ pathshala, students, onBack, onEdit }) {
       <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-forest-700 transition-colors font-medium">
         ← Back to all Paathshalas
       </button>
+
+      {/* ── ACTION BAR — always visible at top ─────────────────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* Download template */}
+        <button
+          onClick={handleDownloadTemplate}
+          disabled={templateLoading}
+          className="flex items-center gap-4 bg-white border-2 border-forest-200 hover:border-forest-500 rounded-2xl p-4 text-left transition-all group disabled:opacity-50 shadow-sm"
+        >
+          <div className="w-12 h-12 bg-forest-50 group-hover:bg-forest-100 rounded-xl flex items-center justify-center text-2xl flex-shrink-0 transition-colors">
+            📥
+          </div>
+          <div>
+            <div className="font-bold text-gray-800 text-sm">Download Excel Template</div>
+            <div className="text-xs text-gray-500 mt-0.5">
+              {templateLoading ? 'Generating…' : 'Pre-filled with dropdown options for Gender, Age Group & Class Group'}
+            </div>
+          </div>
+        </button>
+
+        {/* Upload file */}
+        <label
+          className="flex items-center gap-4 bg-white border-2 border-saffron-200 hover:border-saffron-500 rounded-2xl p-4 text-left transition-all group cursor-pointer shadow-sm"
+          onDragOver={e => e.preventDefault()}
+          onDrop={e => {
+            e.preventDefault();
+            const file = e.dataTransfer.files?.[0];
+            if (file) handleImportFile(file);
+          }}
+        >
+          <div className="w-12 h-12 bg-saffron-50 group-hover:bg-saffron-100 rounded-xl flex items-center justify-center text-2xl flex-shrink-0 transition-colors">
+            📤
+          </div>
+          <div className="flex-1">
+            <div className="font-bold text-gray-800 text-sm">Upload Students File</div>
+            <div className="text-xs text-gray-500 mt-0.5">Drop or click — supports .xlsx and .csv</div>
+            {csvResult && (
+              <div className={`mt-1.5 text-xs font-semibold ${csvResult.success ? 'text-green-600' : 'text-red-500'}`}>
+                {csvResult.success ? `✓ ${csvResult.count} students imported` : `✗ ${csvResult.error}`}
+              </div>
+            )}
+          </div>
+          <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={e => handleImportFile(e.target.files?.[0])} />
+        </label>
+      </div>
 
       {/* Info card */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
@@ -656,42 +741,26 @@ function PathshalaDetail({ pathshala, students, onBack, onEdit }) {
             </span>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button
-              onClick={handleDownloadTemplate}
-              disabled={templateLoading}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-            >
-              <span>📥</span> {templateLoading ? 'Generating…' : 'Excel Template'}
-            </button>
             {myStudents.length > 0 && (
               <button onClick={handleExport} className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-                <span>📤</span> Export CSV
+                📤 Export CSV
               </button>
             )}
             <button onClick={() => setShowAddStudent(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-forest-700 text-white rounded-lg hover:bg-forest-800 transition-colors">
-              <span>+</span> Add Student
+              + Add Student
             </button>
           </div>
-        </div>
-
-        {/* Upload zone */}
-        <div className="px-5 pt-4 pb-2">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Bulk Upload</p>
-          <UploadZone pathshala={pathshala} onImport={handleImport} />
-          {csvResult && (
-            <div className={`mt-3 px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 ${csvResult.success ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-              {csvResult.success ? `✓ ${csvResult.count} students imported successfully` : `✗ ${csvResult.error}`}
-            </div>
-          )}
         </div>
 
         {/* Table */}
         {myStudents.length === 0 ? (
           <div className="py-10 text-center text-gray-400 px-5">
             <div className="text-4xl mb-2">👥</div>
-            <div className="text-sm font-medium">No students yet</div>
-            <div className="text-xs mt-1">Add manually or upload the Excel template above</div>
-            <div className="text-xs text-forest-600 mt-1">Roll numbers: <span className="font-mono">{String(pathshala.paathshala_code).padStart(2,'0')}01</span>, <span className="font-mono">{String(pathshala.paathshala_code).padStart(2,'0')}02</span>…</div>
+            <div className="text-sm font-medium text-gray-600">No students yet</div>
+            <div className="text-xs mt-1">Use the Upload or Add Student buttons above</div>
+            <div className="text-xs text-forest-600 mt-2 font-mono">
+              Roll numbers will be: {String(pathshala.paathshala_code).padStart(2,'0')}01, {String(pathshala.paathshala_code).padStart(2,'0')}02…
+            </div>
           </div>
         ) : (
           <div className="overflow-x-auto mt-2">
