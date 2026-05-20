@@ -23,7 +23,6 @@ const NAV_ITEMS = [
   { key: 'dashboard',     icon: '📊', label: 'admin.dashboard' },
   { key: 'checkIn',       icon: '✅', label: 'admin.checkIn' },
   { key: 'students',      icon: '👥', label: 'admin.students' },
-  { key: 'classes',       icon: '🏫', label: 'admin.classes' },
   { key: 'pathshala',    icon: '🕌', label: 'admin.pathshala' },
   { key: 'leaderboard',   icon: '🏆', label: 'admin.leaderboard' },
   { key: 'schedule',      icon: '📅', label: 'admin.schedule' },

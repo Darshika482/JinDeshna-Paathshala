@@ -82,9 +82,11 @@ export const usePathshalaStore = create(
           parent_name: studentData.parent_name,
           father_name: studentData.parent_name,
           mobile: studentData.mobile,
+          gender: studentData.gender || null,
+          age: studentData.age ? parseInt(studentData.age) : null,
           pathshala: pathshala.paathshala_name,
           paathshala_code: pathshala.paathshala_code,
-          group: pathshala.teacher1_name || '',
+          group: studentData.class_group || pathshala.teacher1_name || '',
           total_points: 0,
           day_points: [0, 0, 0, 0, 0, 0, 0],
           checked_in: false,
@@ -110,16 +112,20 @@ export const usePathshalaStore = create(
         const newStudents = rows.map(row => {
           const rollNo = `${pp}${String(nextSeq).padStart(2, '0')}`;
           nextSeq++;
+          const name = String(row.name || '').trim();
+          const parent = String(row.parent_name || '').trim();
           return {
             id: `s_${Date.now()}_${Math.random().toString(36).slice(2, 6)}_${rollNo}`,
             roll_no: rollNo,
-            name: String(row.name || '').trim(),
-            parent_name: String(row.parent_name || '').trim(),
-            father_name: String(row.parent_name || '').trim(),
+            name,
+            parent_name: parent,
+            father_name: parent,
             mobile: String(row.mobile || '').trim(),
+            gender: String(row.gender || '').trim() || null,
+            age: row.age ? parseInt(row.age) : null,
             pathshala: pathshala.paathshala_name,
             paathshala_code: pathshala.paathshala_code,
-            group: pathshala.teacher1_name || '',
+            group: String(row.class_group || '').trim() || pathshala.teacher1_name || '',
             total_points: 0,
             day_points: [0, 0, 0, 0, 0, 0, 0],
             checked_in: false,
