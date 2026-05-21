@@ -38,7 +38,7 @@ function toRemoteTransactionPayload(tx) {
 
 // Columns that might be missing on older Supabase schemas. If insert fails
 // because of one of these, we retry without it.
-const OPTIONAL_TX_COLUMNS = new Set(['coin_count', 'type', 'notes', 'flagged']);
+const OPTIONAL_TX_COLUMNS = new Set(['coin_count', 'type', 'notes', 'flagged', 'roll_no']);
 
 async function insertTransactionWithFallback(payload) {
   let current = { ...payload };

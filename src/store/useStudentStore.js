@@ -72,9 +72,9 @@ export const useStudentStore = create(
           day_points: [0, 0, 0, 0, 0, 0, 0],
           checked_in: false,
         };
-        const { error } = await supabase.from('students').insert(newStudent);
+        const { data, error } = await supabase.from('students').insert(newStudent).select().single();
         if (error) return { success: false, error: error.message };
-        set(state => ({ students: [...state.students, newStudent] }));
+        set(state => ({ students: [...state.students, data || newStudent] }));
         return { success: true };
       },
 

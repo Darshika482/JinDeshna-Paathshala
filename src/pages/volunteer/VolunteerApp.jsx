@@ -73,13 +73,12 @@ const AWARD_CATEGORIES = [
 ];
 
 const BEHAVIOUR_CAP = 4;
-const EXAM_MAX = 80;
-const TABS = ['award', 'exam', 'duties', 'log'];
+const TABS = ['award', 'duties', 'log'];
 
 export default function VolunteerApp() {
   const { t, i18n } = useTranslation();
   const { currentUser, logout, refreshCurrentUser } = useAuthStore();
-  const { search, searchResults, students, setExamMarks: updateExamMarks } = useStudentStore();
+  const { search, searchResults } = useStudentStore();
   const {
     recordMentorEntry,
     syncPendingMentorEntries,
@@ -104,11 +103,6 @@ export default function VolunteerApp() {
   const [step, setStep] = useState(1); // 1=search, 2=action, 3=reason
   const [showQr, setShowQr] = useState(false);
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
-  const [examSearch, setExamSearch] = useState('');
-  const [examSelectedList, setExamSelectedList] = useState([]);
-  const [examMarks, setExamMarksInput] = useState('');
-  const [examSubmitting, setExamSubmitting] = useState(false);
-  const [examRecent, setExamRecent] = useState([]);
 
   const isHindi = i18n.language === 'hi';
   const pendingCount = pendingMentorEntries.length;
@@ -259,82 +253,6 @@ export default function VolunteerApp() {
       .slice(0, 30);
   })();
 
-  const formatBatchClass = (student) => {
-    const batch = String(student?.batch || '').trim();
-    const className = String(student?.class || '').trim();
-    if (batch && className) return `${batch} · Class ${className}`;
-    if (batch) return batch;
-    if (className) return `Class ${className}`;
-    return 'Bhag not set';
-  };
-
-  const examSelectedIds = new Set(examSelectedList.map(s => s.id));
-  const examResults = examSearch.trim().length >= 2
-    ? students
-        .filter(s =>
-          !examSelectedIds.has(s.id) && (
-            s.name.toLowerCase().includes(examSearch.toLowerCase()) ||
-            (s.roll_no || '').toLowerCase().includes(examSearch.toLowerCase())
-          )
-        )
-        .slice(0, 8)
-    : [];
-
-  const examMarksNum = parseInt(examMarks, 10);
-  const examMarksValid = examSelectedList.length > 0 && examMarks !== '' && !isNaN(examMarksNum) && examMarksNum >= 0 && examMarksNum <= EXAM_MAX;
-
-  const handleSaveExamMarks = async () => {
-    if (!examMarksValid) return;
-    setExamSubmitting(true);
-    let saved = 0;
-    let failed = 0;
-    const newRecent = [];
-    try {
-      for (const student of examSelectedList) {
-        const prevMarks = student.exam_marks ?? null;
-        const delta = examMarksNum - (prevMarks ?? 0);
-        try {
-          const res = await updateExamMarks(student.id, examMarksNum);
-          if (!res?.success) throw new Error(res?.error || 'Failed');
-          if (delta !== 0) {
-            const txRes = await recordMentorEntry({
-              student_id: student.id,
-              student_name: student.name,
-              roll_no: student.roll_no || null,
-              volunteer_id: currentUser?.id,
-              volunteer_name: currentUser?.name,
-              activity: `Exam Marks (${examMarksNum}/${EXAM_MAX})`,
-              type: 'Exam',
-              points: delta,
-              coin_count: 0,
-              day: currentDay,
-              slot: currentSlot,
-              notes: null,
-            }, delta);
-            if (txRes?.pending) toast('Saved offline. Will sync when online.', { icon: '📡' });
-          }
-          newRecent.push({ id: `${Date.now()}_${student.id}`, name: student.name, className: student.class, marks: examMarksNum, delta });
-          saved++;
-        } catch (err) {
-          console.error('Exam save failed for', student.name, err);
-          failed++;
-        }
-      }
-      if (saved > 0) {
-        setExamRecent(prev => [...newRecent, ...prev].slice(0, 20));
-        const label = saved === 1 ? examSelectedList[0].name : `${saved} students`;
-        setSuccessData({ action: 'exam', student: { name: label }, points: 0, marks: examMarksNum });
-        setTimeout(() => setSuccessData(null), 3000);
-      }
-      if (failed > 0) toast.error(`Failed for ${failed} student(s). Check connection.`);
-      setExamSelectedList([]);
-      setExamSearch('');
-      setExamMarksInput('');
-    } finally {
-      setExamSubmitting(false);
-    }
-  };
-
   const handleClearPending = () => {
     if (pendingMentorEntries.length === 0) return;
     const ok = window.confirm(
@@ -416,18 +334,14 @@ export default function VolunteerApp() {
 
       {/* Success Banner */}
       {successData && (
-        <div className={`text-white px-4 py-3 flex items-center gap-3 fade-in ${successData.action === 'exam' ? 'bg-blue-600' : successData.action === 'give' ? 'bg-green-500' : 'bg-orange-500'}`}>
-          <span className="text-2xl">{successData.action === 'give' ? '✅' : successData.action === 'exam' ? '📝' : '⚠️'}</span>
+        <div className={`text-white px-4 py-3 flex items-center gap-3 fade-in ${successData.action === 'give' ? 'bg-green-500' : 'bg-orange-500'}`}>
+          <span className="text-2xl">{successData.action === 'give' ? '✅' : '⚠️'}</span>
           <div>
             <div className="font-bold">
-              {successData.action === 'give' ? t('volunteer.pointsAwarded')
-               : successData.action === 'exam' ? `Exam saved — ${successData.marks}/${EXAM_MAX}`
-               : t('volunteer.pointsDeducted')}
+              {successData.action === 'give' ? t('volunteer.pointsAwarded') : t('volunteer.pointsDeducted')}
             </div>
             <div className="text-sm opacity-90">
-              {successData.action === 'exam'
-                ? `${successData.points > 0 ? `+${successData.points}` : successData.points === 0 ? 'No point change' : successData.points} pts — ${successData.student.name}`
-                : `${Math.abs(successData.points)} ${t('common.points')} — ${successData.student.name}`}
+              {`${Math.abs(successData.points)} ${t('common.points')} — ${successData.student.name}`}
             </div>
           </div>
         </div>
@@ -723,183 +637,6 @@ export default function VolunteerApp() {
           </div>
         )}
 
-        {activeTab === 'exam' && (
-          <div className="p-4 max-w-3xl mx-auto space-y-4">
-            <h2 className="section-header">Exam Marks</h2>
-
-            {/* Step 1: Search + multi-select */}
-            <div className="card p-4 space-y-3">
-              <div className="font-semibold text-gray-700 text-sm">
-                1. Add Students <span className="font-normal text-gray-400">(search and tap to add multiple)</span>
-              </div>
-
-              <input
-                className="input-field"
-                placeholder="Search name or roll no…"
-                value={examSearch}
-                onChange={e => setExamSearch(e.target.value)}
-                autoComplete="off"
-              />
-
-              {/* Search results */}
-              {examResults.length > 0 && (
-                <div className="rounded-xl border border-gray-200 overflow-hidden">
-                  {examResults.map(s => (
-                    <button
-                      key={s.id}
-                      onClick={() => { setExamSelectedList(prev => [...prev, s]); setExamSearch(''); }}
-                      className={`w-full text-left px-3 py-2.5 border-b last:border-0 border-gray-100 text-sm transition-colors flex items-center justify-between gap-2
-                        ${s.exam_marks != null ? 'bg-amber-50 hover:bg-amber-100' : 'bg-white hover:bg-blue-50'}`}
-                    >
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-medium text-gray-900">{s.name}</span>
-                          {s.roll_no && <span className="text-gray-400 text-xs">#{s.roll_no}</span>}
-                          <span className={`text-xs font-semibold ${s.checked_in ? 'text-green-600' : 'text-gray-400'}`}>
-                            {s.checked_in ? '✓' : '○'}
-                          </span>
-                        </div>
-                        <div className="text-xs text-gray-400">{formatBatchClass(s)}</div>
-                      </div>
-                      <div className="flex-shrink-0 flex items-center gap-2">
-                        {s.exam_marks != null && (
-                          <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-amber-200 text-amber-800">⚠ {s.exam_marks}/{EXAM_MAX}</span>
-                        )}
-                        <span className="text-blue-600 font-bold text-lg leading-none">+</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {examSearch.trim().length >= 2 && examResults.length === 0 && (
-                <div className="text-center py-3 text-gray-400 text-sm">No results</div>
-              )}
-
-              {/* Selected students list */}
-              {examSelectedList.length > 0 && (
-                <div className="space-y-1.5 pt-1">
-                  <div className="text-xs text-gray-400 font-medium uppercase tracking-wide">
-                    Selected ({examSelectedList.length})
-                  </div>
-                  {examSelectedList.map(s => (
-                    <div key={s.id} className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-semibold text-gray-900 text-sm">{s.name}</span>
-                          {s.roll_no && <span className="text-gray-400 text-xs">#{s.roll_no}</span>}
-                          <span className={`text-xs font-semibold ${s.checked_in ? 'text-green-600' : 'text-gray-400'}`}>
-                            {s.checked_in ? '✓ In' : '○ Out'}
-                          </span>
-                          {s.exam_marks != null && (
-                            <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-amber-200 text-amber-800">⚠ {s.exam_marks}/{EXAM_MAX}</span>
-                          )}
-                        </div>
-                        <div className="text-xs text-gray-400">{formatBatchClass(s)}</div>
-                      </div>
-                      <button
-                        onClick={() => setExamSelectedList(prev => prev.filter(x => x.id !== s.id))}
-                        className="text-gray-400 hover:text-red-500 text-lg leading-none px-1 flex-shrink-0"
-                      >✕</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Step 2: Marks input + submit */}
-            {examSelectedList.length > 0 && (
-              <div className="card p-4 space-y-3">
-                <div className="font-semibold text-gray-700 text-sm">
-                  2. Enter Marks for {examSelectedList.length === 1 ? examSelectedList[0].name : `all ${examSelectedList.length} students`}
-                </div>
-                <input
-                  type="number"
-                  min="0"
-                  max={EXAM_MAX}
-                  inputMode="numeric"
-                  className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-center text-3xl font-bold focus:outline-none focus:border-blue-400"
-                  placeholder={`0 – ${EXAM_MAX}`}
-                  value={examMarks}
-                  onChange={e => setExamMarksInput(e.target.value)}
-                />
-                {examSelectedList.some(s => s.exam_marks != null) && examMarksValid && (
-                  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                    ⚠ {examSelectedList.filter(s => s.exam_marks != null).length} student(s) already have marks — those will be updated and points adjusted by the difference.
-                  </div>
-                )}
-                <button
-                  onClick={handleSaveExamMarks}
-                  disabled={!examMarksValid || examSubmitting}
-                  className="w-full py-4 rounded-xl bg-blue-600 text-white font-bold text-lg active:scale-[0.98] transition-all disabled:opacity-50 shadow-md"
-                >
-                  {examSubmitting
-                    ? 'Saving…'
-                    : examMarksValid
-                      ? `Save ${examMarksNum}/${EXAM_MAX} for ${examSelectedList.length === 1 ? examSelectedList[0].name : `${examSelectedList.length} students`}`
-                      : 'Enter marks above'}
-                </button>
-              </div>
-            )}
-
-            {/* Session log */}
-            {examRecent.length > 0 && (
-              <div>
-                <div className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-2">Entered This Session</div>
-                <div className="space-y-1.5">
-                  {examRecent.map(r => (
-                    <div key={r.id} className="card px-3 py-2 text-sm flex items-center justify-between">
-                      <div>
-                        <span className="font-medium text-gray-800">{r.name}</span>
-                        {r.className && <span className="text-gray-400 ml-2 text-xs">Class {r.className}</span>}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-blue-700">{r.marks}/{EXAM_MAX}</span>
-                        {r.delta !== 0 && (
-                          <span className={`text-xs font-medium ${r.delta > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            ({r.delta > 0 ? `+${r.delta}` : r.delta})
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* All marked students overview */}
-            {(() => {
-              const marked = students
-                .filter(s => s.exam_marks != null)
-                .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-              if (!marked.length) return null;
-              return (
-                <div>
-                  <div className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-2">
-                    Students Marked ({marked.length})
-                  </div>
-                  <div className="space-y-1">
-                    {marked.map(s => (
-                      <div key={s.id} className="flex items-center justify-between px-3 py-2 bg-white rounded-xl border border-gray-100 text-sm">
-                        <div className="min-w-0">
-                          <span className="font-medium text-gray-800 truncate">{s.name}</span>
-                          {s.roll_no && <span className="text-gray-400 ml-2 text-xs">#{s.roll_no}</span>}
-                          {s.batch && <span className="text-gray-400 ml-1 text-xs">· {s.batch}</span>}
-                        </div>
-                        <div className="flex-shrink-0 flex items-center gap-2 ml-2">
-                          <span className={`text-xs font-semibold ${s.checked_in ? 'text-green-600' : 'text-gray-400'}`}>
-                            {s.checked_in ? '✓ In' : '○ Out'}
-                          </span>
-                          <span className="font-bold text-green-700">{s.exam_marks}/{EXAM_MAX}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        )}
-
         {activeTab === 'log' && (
           <div className="p-4 max-w-3xl mx-auto">
             <h2 className="section-header">{t('nav.log')}</h2>
@@ -975,9 +712,9 @@ export default function VolunteerApp() {
                   ? 'bg-white/70 text-saffron-600 shadow-sm'
                   : 'text-gray-700/80 hover:bg-white/30'}`}
             >
-              <span className="text-xl">{tab === 'award' ? '🏆' : tab === 'exam' ? '📝' : tab === 'duties' ? '📌' : '📋'}</span>
+              <span className="text-xl">{tab === 'award' ? '🏆' : tab === 'duties' ? '📌' : '📋'}</span>
               <span className="text-xs font-medium capitalize">
-                {tab === 'duties' ? 'Duties' : tab === 'exam' ? 'Exam' : t(`nav.${tab}`)}
+                {tab === 'duties' ? 'Duties' : t(`nav.${tab}`)}
               </span>
             </button>
           ))}
