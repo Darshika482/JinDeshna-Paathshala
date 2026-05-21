@@ -200,7 +200,9 @@
     "markDone": "Mark Done",
     "operations": "Operations",
     "settings": "Settings",
-    "pathshala": "Paathshala"
+    "pathshala": "Paathshala",
+    "pointReasons": "Point Categories",
+    "competitions": "Competitions"
   },
   "coinkeeper": {
     "title": "Master Coin Keeper",

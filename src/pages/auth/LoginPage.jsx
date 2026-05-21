@@ -23,10 +23,6 @@ export default function LoginPage() {
   const campName = useConfigStore(s => s.campName) || import.meta.env.VITE_CAMP_NAME || t('app.title');
   const campCity = useConfigStore(s => s.campCity) || import.meta.env.VITE_CAMP_CITY || t('app.subtitle');
 
-  const adminPasswordConfigured = !!(() => {
-    try { return JSON.parse(localStorage.getItem('shiviros-config') || '{}').adminPassword; } catch { return false; }
-  })();
-
   const [selectedRole, setSelectedRole] = useState(null);
   const [pin, setPin] = useState('');
   const [password, setPassword] = useState('');
@@ -161,11 +157,6 @@ export default function LoginPage() {
                   onChange={e => setPassword(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleSubmit()}
                 />
-                {!adminPasswordConfigured && (
-                  <p className="text-xs text-amber-600 mt-2 text-center font-medium">
-                    Default password: <span className="font-bold">darshika</span> — change it in Admin → Settings after login
-                  </p>
-                )}
               </div>
             )}
 
