@@ -6,7 +6,7 @@ function getAdminPassword() {
   try {
     const raw = localStorage.getItem('shiviros-config');
     const stored = raw ? JSON.parse(raw)?.state : null;
-    return stored?.adminPassword || import.meta.env.VITE_ADMIN_PASSWORD || 'darshika';
+    return stored?.adminPassword || import.meta.env.VITE_ADMIN_PASSWORD || 'jindeshna@4';
   } catch { return import.meta.env.VITE_ADMIN_PASSWORD || 'darshika'; }
 }
 

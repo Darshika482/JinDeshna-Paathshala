@@ -200,7 +200,9 @@
     "markDone": "पूर्ण चिह्नित करें",
     "operations": "संचालन",
     "settings": "सेटिंग्स",
-    "pathshala": "पाठशाला"
+    "pathshala": "पाठशाला",
+    "pointReasons": "पॉइंट श्रेणियाँ",
+    "competitions": "प्रतियोगिताएँ"
   },
   "coinkeeper": {
     "title": "मुख्य सिक्का प्रबंधक",

@@ -4,76 +4,14 @@ import toast from 'react-hot-toast';
 import { useAuthStore } from '../../store/useAuthStore.js';
 import { useStudentStore } from '../../store/useStudentStore.js';
 import { useTransactionStore } from '../../store/useTransactionStore.js';
+import { usePointReasonsStore } from '../../store/usePointReasonsStore.js';
+import { useCompetitionsStore } from '../../store/useCompetitionsStore.js';
 import LanguageToggle from '../../components/common/LanguageToggle.jsx';
 import ConfirmDialog from '../../components/common/ConfirmDialog.jsx';
 import OfflineBanner from '../../components/common/OfflineBanner.jsx';
 import QrScanner from '../../components/common/QrScanner.jsx';
 
-// Physical coin activities — each award adds 1 coin_count
-const COIN_REASONS = [
-  { key: 'early_riser',      emoji: '🌅', pts: 5,  type: 'Coin', hi: 'अर्ली राइजर (5 बजे से पहले)' },
-  { key: 'yoga_qa',          emoji: '🧘', pts: 5,  type: 'Coin', hi: 'योग - Q&A / भागीदारी' },
-  { key: 'yoga_sincerity',   emoji: '🧘', pts: 5,  type: 'Coin', hi: 'योग - लगन / ध्यान' },
-  { key: 'poojan_qa',        emoji: '🙏', pts: 5,  type: 'Coin', hi: 'पूजन - Q&A / भागीदारी' },
-  { key: 'poojan_sincerity', emoji: '🙏', pts: 5,  type: 'Coin', hi: 'पूजन - लगन' },
-  { key: 'kaksha_qa',        emoji: '✋', pts: 5,  type: 'Coin', hi: 'कक्षा - Q&A / उत्तर' },
-  { key: 'kaksha_sincerity', emoji: '⭐', pts: 10, type: 'Coin', hi: 'कक्षा - विशेष लगन (+10)' },
-  { key: 'kaksha_question',  emoji: '🔍', pts: 5,  type: 'Coin', hi: 'कक्षा - अच्छा प्रश्न' },
-  { key: 'samuhik_qa',       emoji: '🏛️', pts: 5,  type: 'Coin', hi: 'सामूहिक कक्षा - Q&A' },
-  { key: 'bhakti_sincerity', emoji: '🎵', pts: 5,  type: 'Coin', hi: 'भक्ति - लगन' },
-  { key: 'khojooge',         emoji: '🔎', pts: 5,  type: 'Coin', hi: 'खोजोगे तो पाओगे' },
-];
-
-// Good Behaviour — digital only, capped at 4 per student per day
-const BEHAVIOUR_REASONS = [
-  { key: 'self_study',         emoji: '📚', pts: 5, type: 'Behaviour', hi: 'स्वाध्याय' },
-  { key: 'helping_others',     emoji: '🤝', pts: 5, type: 'Behaviour', hi: 'दूसरों की मदद' },
-  { key: 'cleanliness',        emoji: '✨', pts: 5, type: 'Behaviour', hi: 'व्यक्तिगत साफ-सफाई' },
-  { key: 'meal_discipline',    emoji: '🍽', pts: 5, type: 'Behaviour', hi: 'भोजन अनुशासन' },
-  { key: 'morning_routine',    emoji: '🛏', pts: 5, type: 'Behaviour', hi: 'सुबह दिनचर्या' },
-  { key: 'queue_discipline',   emoji: '🚶', pts: 5, type: 'Behaviour', hi: 'पंक्ति अनुशासन' },
-  { key: 'first_ready',        emoji: '⚡', pts: 5, type: 'Behaviour', hi: 'सबसे पहले तैयार' },
-  { key: 'diary_writing',      emoji: '📓', pts: 5, type: 'Behaviour', hi: 'सांध्य डायरी' },
-  { key: 'wake_up_self',       emoji: '⏰', pts: 5, type: 'Behaviour', hi: 'खुद उठना' },
-  { key: 'meditation_posture', emoji: '🕉️', pts: 5, type: 'Behaviour', hi: 'ध्यान मुद्रा' },
-  { key: 'encouraging_peers',  emoji: '💪', pts: 5, type: 'Behaviour', hi: 'साथियों को प्रोत्साहन' },
-];
-
-// Other digital awards — no physical coin issued
-const DIGITAL_REASONS = [
-  { key: 'room_discipline',       emoji: '🏠', pts: 5,  type: 'Digital', hi: 'कमरा अनुशासन' },
-  { key: 'copy_notes',            emoji: '📝', pts: 5,  type: 'Digital', hi: 'नोट्स - सही' },
-  { key: 'copy_decorated',        emoji: '🎨', pts: 10, type: 'Digital', hi: 'नोट्स + सजावट' },
-  { key: 'kanth_half',            emoji: '🎤', pts: 10, type: 'Digital', hi: 'कंठ पाठ - आधा' },
-  { key: 'kanth_full',            emoji: '🎤', pts: 20, type: 'Digital', hi: 'कंठ पाठ - पूर्ण' },
-  { key: 'program_participation', emoji: '🎭', pts: 5,  type: 'Digital', hi: 'कार्यक्रम - भागीदारी' },
-  { key: 'program_tough_qa',      emoji: '🏆', pts: 10, type: 'Digital', hi: 'कार्यक्रम - कठिन प्रश्न' },
-  { key: 'program_winner',        emoji: '🥇', pts: 20, type: 'Digital', hi: 'कार्यक्रम - विजेता' },
-  { key: 'drawing_consolation',   emoji: '🖼️', pts: 10, type: 'Digital', hi: 'चित्र/कहानी - सांत्वना' },
-  { key: 'drawing_3rd',           emoji: '🥉', pts: 15, type: 'Digital', hi: 'चित्र/कहानी - तीसरा' },
-  { key: 'drawing_2nd',           emoji: '🥈', pts: 20, type: 'Digital', hi: 'चित्र/कहानी - दूसरा' },
-  { key: 'drawing_1st',           emoji: '🥇', pts: 25, type: 'Digital', hi: 'चित्र/कहानी - पहला' },
-  { key: 'other',                 emoji: '➕', pts: 5,  type: 'Digital', hi: 'अन्य', needsText: true },
-];
-
-const DEDUCT_REASONS = [
-  { key: 'misbehaviour',         emoji: '😤', pts: 5,  hi: 'दुर्व्यवहार / अशिष्टता' },
-  { key: 'fighting',             emoji: '⚡', pts: 5,  hi: 'लड़ाई / विवाद' },
-  { key: 'abusive_language',     emoji: '🚫', pts: 10, hi: 'अपशब्द' },
-  { key: 'physical_altercation', emoji: '💥', pts: 10, hi: 'मारपीट' },
-  { key: 'disrespect',           emoji: '🙅', pts: 5,  hi: 'अनादर' },
-  { key: 'entry_mistake',        emoji: '↩️', pts: 5,  hi: 'गलत अंक सुधार', needsText: true },
-  { key: 'other',                emoji: '➖', pts: 5,  hi: 'अन्य कारण', needsText: true },
-];
-
-const AWARD_CATEGORIES = [
-  { key: 'coin',      label: '🪙 Physical Coin', hi: '🪙 सिक्का' },
-  { key: 'behaviour', label: '⭐ Good Behaviour', hi: '⭐ व्यवहार' },
-  { key: 'digital',   label: '📱 Other Digital',  hi: '📱 अन्य डिजिटल' },
-];
-
-const BEHAVIOUR_CAP = 4;
-const TABS = ['award', 'duties', 'log'];
+const TABS = ['award', 'competitions', 'duties', 'log'];
 
 export default function VolunteerApp() {
   const { t, i18n } = useTranslation();
@@ -90,12 +28,20 @@ export default function VolunteerApp() {
     currentSlot,
     transactions,
   } = useTransactionStore();
+  const {
+    loading: reasonsLoading,
+    fetch: fetchReasons,
+    getGiveCategories,
+    getTakeCategory,
+    getReasonsForCategory,
+  } = usePointReasonsStore();
+  const { fetch: fetchCompetitions, getActive: getActiveCompetitions } = useCompetitionsStore();
 
   const [activeTab, setActiveTab] = useState('award');
   const [query, setQuery] = useState('');
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [action, setAction] = useState(null); // 'give' | 'take'
-  const [awardCategory, setAwardCategory] = useState('coin');
+  const [awardCategory, setAwardCategory] = useState(null); // category ID from DB
   const [selectedReason, setSelectedReason] = useState(null);
   const [otherText, setOtherText] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -104,8 +50,30 @@ export default function VolunteerApp() {
   const [showQr, setShowQr] = useState(false);
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
 
+  // Competitions tab state
+  const [compStep, setCompStep] = useState(1); // 1=select competition, 2=select students
+  const [compSelectedStudents, setCompSelectedStudents] = useState([]);
+  const [compQuery, setCompQuery] = useState('');
+  const [compConfirmComp, setCompConfirmComp] = useState(null);
+  const [compSuccess, setCompSuccess] = useState(null);
+  const [compSubmitting, setCompSubmitting] = useState(false);
+
   const isHindi = i18n.language === 'hi';
   const pendingCount = pendingMentorEntries.length;
+
+  const giveCategories = getGiveCategories();
+  const takeCategory = getTakeCategory();
+  const behaviourCategory = giveCategories.find(c => c.tx_type === 'Behaviour');
+  const BEHAVIOUR_CAP = behaviourCategory?.behaviour_cap ?? 4;
+
+  useEffect(() => { fetchReasons(); fetchCompetitions(); }, [fetchReasons, fetchCompetitions]);
+
+  // Set initial awardCategory to first give category once loaded
+  useEffect(() => {
+    if (giveCategories.length > 0 && !awardCategory) {
+      setAwardCategory(giveCategories[0].id);
+    }
+  }, [giveCategories, awardCategory]);
 
   useEffect(() => {
     const onOnline = () => setIsOnline(true);
@@ -157,7 +125,7 @@ export default function VolunteerApp() {
     search('');
     setStep(2);
     setAction(null);
-    setAwardCategory('coin');
+    setAwardCategory(giveCategories[0]?.id || null);
     setSelectedReason(null);
     setOtherText('');
     setSuccessData(null);
@@ -166,7 +134,7 @@ export default function VolunteerApp() {
   const handleActionSelect = (a) => {
     setAction(a);
     setStep(3);
-    setAwardCategory('coin');
+    setAwardCategory(giveCategories[0]?.id || null);
     setSelectedReason(null);
     setOtherText('');
   };
@@ -179,12 +147,12 @@ export default function VolunteerApp() {
 
   const handleReasonSelect = (r) => {
     setSelectedReason(r);
-    if (!r.needsText) setOtherText('');
+    if (!r.needs_text) setOtherText('');
   };
 
   const canSubmit = () => {
     if (!selectedReason) return false;
-    if (selectedReason.needsText && !otherText.trim()) return false;
+    if (selectedReason.needs_text && !otherText.trim()) return false;
     if (action === 'take' && !otherText.trim()) return false;
     return true;
   };
@@ -194,20 +162,23 @@ export default function VolunteerApp() {
     const points = action === 'take' ? -selectedReason.pts : selectedReason.pts;
     const studentSnapshot = selectedStudent;
     const actionSnapshot = action;
+    const selectedCat = giveCategories.find(c => c.id === awardCategory);
+    const txType = action === 'take' ? 'Deduction' : (selectedCat?.tx_type || 'Digital');
+    const activityLabel = selectedReason.label_en;
     const tx = {
       student_id: selectedStudent.id,
       student_name: selectedStudent.name,
       roll_no: selectedStudent.roll_no || null,
       volunteer_id: currentUser?.id,
       volunteer_name: currentUser?.name,
-      activity: selectedReason.needsText
+      activity: selectedReason.needs_text
         ? otherText
         : action === 'take' && otherText.trim()
-          ? `${t(`reasons.${selectedReason.key}`)}: ${otherText.trim()}`
-          : t(`reasons.${selectedReason.key}`),
-      type: action === 'take' ? 'Deduction' : selectedReason.type,
+          ? `${activityLabel}: ${otherText.trim()}`
+          : activityLabel,
+      type: txType,
       points,
-      coin_count: selectedReason.type === 'Coin' && action === 'give' ? 1 : 0,
+      coin_count: txType === 'Coin' && action === 'give' ? 1 : 0,
       day: currentDay,
       slot: currentSlot,
       notes: otherText,
@@ -237,12 +208,8 @@ export default function VolunteerApp() {
   };
 
   const currentReasons = action === 'take'
-    ? DEDUCT_REASONS
-    : awardCategory === 'coin'
-      ? COIN_REASONS
-      : awardCategory === 'behaviour'
-        ? BEHAVIOUR_REASONS
-        : DIGITAL_REASONS;
+    ? (takeCategory ? getReasonsForCategory(takeCategory.id) : [])
+    : (awardCategory ? getReasonsForCategory(awardCategory) : []);
 
   const myLog = (() => {
     const uid = String(currentUser?.id || '');
@@ -477,21 +444,21 @@ export default function VolunteerApp() {
                     {/* Category tabs (give only) */}
                     {action === 'give' && (
                       <div className="flex gap-0 mb-4 border-2 border-gray-200 rounded-xl overflow-hidden">
-                        {AWARD_CATEGORIES.map(cat => (
+                        {giveCategories.map(cat => (
                           <button
-                            key={cat.key}
-                            onClick={() => handleCategorySelect(cat.key)}
+                            key={cat.id}
+                            onClick={() => handleCategorySelect(cat.id)}
                             className={`flex-1 py-2.5 px-2 text-xs font-semibold transition-colors text-center leading-tight
-                              ${awardCategory === cat.key ? 'bg-forest-700 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+                              ${awardCategory === cat.id ? 'bg-forest-700 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
                           >
-                            {isHindi ? cat.hi : cat.label}
+                            {isHindi && cat.label_hi ? cat.label_hi : cat.label_en}
                           </button>
                         ))}
                       </div>
                     )}
 
                     {/* Good Behaviour usage indicator */}
-                    {action === 'give' && awardCategory === 'behaviour' && (
+                    {action === 'give' && awardCategory === behaviourCategory?.id && (
                       <div className={`mb-3 rounded-xl px-4 py-2.5 text-sm font-semibold flex items-center gap-2
                         ${behaviourCapped
                           ? 'bg-orange-100 border border-orange-300 text-orange-700'
@@ -508,34 +475,38 @@ export default function VolunteerApp() {
                     )}
 
                     {/* Reason grid */}
+                    {reasonsLoading && !currentReasons.length ? (
+                      <div className="text-center py-8 text-gray-400 text-sm">Loading…</div>
+                    ) : (
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-4">
                       {currentReasons.map(r => {
-                        const blocked = action === 'give' && r.type === 'Behaviour' && behaviourCapped;
+                        const blocked = action === 'give' && awardCategory === behaviourCategory?.id && behaviourCapped;
+                        const selectedCatTxType = giveCategories.find(c => c.id === awardCategory)?.tx_type;
                         return (
                           <button
-                            key={r.key}
+                            key={r.id}
                             onClick={() => !blocked && handleReasonSelect(r)}
                             disabled={blocked}
                             className={`rounded-2xl p-3 text-center border-2 transition-all active:scale-95
                               ${blocked
                                 ? 'border-gray-100 bg-gray-50 opacity-40 cursor-not-allowed'
-                                : selectedReason?.key === r.key
+                                : selectedReason?.id === r.id
                                   ? 'border-saffron-500 bg-saffron-50'
                                   : 'border-gray-200 bg-white hover:border-gray-300'}`}
                           >
                             <div className="text-2xl mb-1">{r.emoji}</div>
-                            <div className="font-semibold text-sm text-gray-900 leading-tight">{t(`reasons.${r.key}`)}</div>
-                            <div className="text-xs text-gray-500 mt-0.5">{r.hi}</div>
+                            <div className="font-semibold text-sm text-gray-900 leading-tight">{r.label_en}</div>
+                            {r.label_hi && <div className="text-xs text-gray-500 mt-0.5">{r.label_hi}</div>}
                             <div className="flex items-center justify-center gap-1 mt-1">
                               <span className={`text-xs font-bold ${action === 'give' ? 'text-green-600' : 'text-red-600'}`}>
                                 {action === 'give' ? '+' : '−'}{r.pts} {t('common.points')}
                               </span>
-                              {r.type && action === 'give' && (
+                              {selectedCatTxType && action === 'give' && (
                                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium
-                                  ${r.type === 'Coin'      ? 'bg-yellow-100 text-yellow-700'
-                                  : r.type === 'Behaviour' ? 'bg-purple-100 text-purple-700'
-                                  :                          'bg-blue-100 text-blue-700'}`}>
-                                  {r.type === 'Coin' ? '🪙' : r.type === 'Behaviour' ? '⭐' : '💻'}
+                                  ${selectedCatTxType === 'Coin'      ? 'bg-yellow-100 text-yellow-700'
+                                  : selectedCatTxType === 'Behaviour' ? 'bg-purple-100 text-purple-700'
+                                  :                                      'bg-blue-100 text-blue-700'}`}>
+                                  {selectedCatTxType === 'Coin' ? '🪙' : selectedCatTxType === 'Behaviour' ? '⭐' : '💻'}
                                 </span>
                               )}
                             </div>
@@ -543,8 +514,9 @@ export default function VolunteerApp() {
                         );
                       })}
                     </div>
+                    )}
 
-                    {(selectedReason?.needsText || action === 'take') && selectedReason && (
+                    {(selectedReason?.needs_text || action === 'take') && selectedReason && (
                       <div className="mb-4">
                         <label className="block text-sm font-semibold text-gray-700 mb-2">
                           {action === 'take'
@@ -579,6 +551,178 @@ export default function VolunteerApp() {
                 )}
               </>
             )}
+          </div>
+        )}
+
+        {activeTab === 'competitions' && (
+          <div className="p-4 max-w-3xl mx-auto">
+            {compSuccess && (
+              <div className="bg-green-500 text-white px-4 py-3 flex items-center gap-3 rounded-2xl mb-4 fade-in">
+                <span className="text-2xl">🥇</span>
+                <div>
+                  <div className="font-bold">Competition points awarded!</div>
+                  <div className="text-sm opacity-90">+{compSuccess.points} pts each — {compSuccess.count} student{compSuccess.count !== 1 ? 's' : ''} — {compSuccess.compName}</div>
+                </div>
+              </div>
+            )}
+
+            {/* Step 1: Select competition */}
+            {compStep === 1 && (
+              <>
+                <h2 className="section-header">Select Competition</h2>
+                {getActiveCompetitions().length === 0 && (
+                  <div className="text-center py-10 text-gray-400 bg-white rounded-2xl border border-gray-200">
+                    No competitions configured. Ask admin to add competitions.
+                  </div>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {getActiveCompetitions().map(comp => (
+                    <button
+                      key={comp.id}
+                      onClick={() => {
+                        setCompConfirmComp(comp);
+                        setCompSelectedStudents([]);
+                        setCompQuery('');
+                        search('');
+                        setCompSuccess(null);
+                        setCompStep(2);
+                      }}
+                      className="rounded-2xl p-4 text-left border-2 border-gray-200 bg-white hover:border-saffron-400 hover:bg-saffron-50 active:scale-95 transition-all shadow-sm"
+                    >
+                      <div className="font-bold text-gray-900 text-base">🥇 {comp.name}</div>
+                      {comp.name_hi && <div className="text-sm text-gray-500 mt-0.5">{comp.name_hi}</div>}
+                      <div className="font-bold text-green-600 mt-2">+{comp.points} points</div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* Step 2: Add students + confirm */}
+            {compStep === 2 && compConfirmComp && (() => {
+              const selectedIds = new Set(compSelectedStudents.map(s => s.id));
+              const compSearchResults = compQuery.trim().length >= 2
+                ? searchResults.filter(s => !selectedIds.has(s.id))
+                : [];
+              return (
+                <>
+                  <div className="flex items-center gap-2 mb-4">
+                    <button
+                      onClick={() => { setCompStep(1); setCompConfirmComp(null); setCompSelectedStudents([]); setCompQuery(''); search(''); }}
+                      className="text-forest-600 font-medium text-sm"
+                    >← Back</button>
+                    <h2 className="section-header mb-0">Add Students</h2>
+                  </div>
+
+                  {/* Competition banner */}
+                  <div className="bg-saffron-50 border-2 border-saffron-300 rounded-2xl px-4 py-3 mb-4 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-semibold text-saffron-600 uppercase tracking-wide">Competition</div>
+                      <div className="font-bold text-gray-900 mt-0.5">🥇 {compConfirmComp.name}</div>
+                      {compConfirmComp.name_hi && <div className="text-xs text-gray-500">{compConfirmComp.name_hi}</div>}
+                    </div>
+                    <div className="font-bold text-green-600 text-lg">+{compConfirmComp.points} pts</div>
+                  </div>
+
+                  {/* Search input */}
+                  <div className="relative mb-2">
+                    <input
+                      className="input-field pr-10"
+                      placeholder="Search name or roll no…"
+                      value={compQuery}
+                      onChange={e => { setCompQuery(e.target.value); search(e.target.value); }}
+                      autoComplete="off"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xl">🔍</span>
+                  </div>
+
+                  {/* Search results */}
+                  {compSearchResults.length > 0 && (
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden mb-3">
+                      {compSearchResults.map(s => (
+                        <button
+                          key={s.id}
+                          onClick={() => { setCompSelectedStudents(prev => [...prev, s]); setCompQuery(''); search(''); }}
+                          className="w-full text-left px-4 py-3 border-b last:border-0 border-gray-100 hover:bg-forest-50 transition-colors flex items-center justify-between"
+                        >
+                          <div>
+                            <div className="font-semibold text-gray-900">{s.name}</div>
+                            <div className="text-xs text-gray-500 font-mono mt-0.5">{s.roll_no} • {s.batch || '—'}</div>
+                          </div>
+                          <span className="text-green-600 font-bold text-xl leading-none">+</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {compQuery.trim().length >= 2 && compSearchResults.length === 0 && searchResults.length === 0 && (
+                    <p className="text-center text-gray-400 text-sm py-2 mb-2">No students found</p>
+                  )}
+
+                  {/* Selected students list */}
+                  {compSelectedStudents.length > 0 && (
+                    <div className="mb-4">
+                      <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                        Selected ({compSelectedStudents.length})
+                      </div>
+                      <div className="space-y-1.5">
+                        {compSelectedStudents.map(s => (
+                          <div key={s.id} className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-semibold text-gray-900 text-sm">{s.name}</div>
+                              <div className="text-xs text-gray-500 font-mono">{s.roll_no} • {s.batch || '—'}</div>
+                            </div>
+                            <button
+                              onClick={() => setCompSelectedStudents(prev => prev.filter(x => x.id !== s.id))}
+                              className="text-gray-400 hover:text-red-500 text-lg leading-none px-1 flex-shrink-0"
+                            >✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Award button */}
+                  {compSelectedStudents.length > 0 && (
+                    <button
+                      disabled={compSubmitting}
+                      onClick={async () => {
+                        const comp = compConfirmComp;
+                        const students = [...compSelectedStudents];
+                        setCompSubmitting(true);
+                        for (const student of students) {
+                          await recordMentorEntry({
+                            student_id: student.id,
+                            student_name: student.name,
+                            roll_no: student.roll_no || null,
+                            volunteer_id: currentUser?.id,
+                            volunteer_name: currentUser?.name,
+                            activity: comp.name,
+                            type: 'Competition',
+                            points: comp.points,
+                            coin_count: 0,
+                            day: currentDay,
+                            slot: currentSlot,
+                            notes: null,
+                          }, comp.points);
+                        }
+                        setCompSubmitting(false);
+                        setCompStep(1);
+                        setCompConfirmComp(null);
+                        setCompSelectedStudents([]);
+                        setCompSuccess({ points: comp.points, count: students.length, compName: comp.name });
+                        setTimeout(() => setCompSuccess(null), 4000);
+                        if (!isOnline) toast('Saved locally. Will sync when online.', { icon: '📡' });
+                      }}
+                      className="w-full py-4 rounded-2xl bg-saffron-500 text-white font-bold text-base active:scale-[0.98] transition-all shadow-md disabled:opacity-60"
+                    >
+                      {compSubmitting
+                        ? 'Saving…'
+                        : `Award +${compConfirmComp.points} pts to ${compSelectedStudents.length} student${compSelectedStudents.length !== 1 ? 's' : ''}`}
+                    </button>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
 
@@ -712,9 +856,9 @@ export default function VolunteerApp() {
                   ? 'bg-white/70 text-saffron-600 shadow-sm'
                   : 'text-gray-700/80 hover:bg-white/30'}`}
             >
-              <span className="text-xl">{tab === 'award' ? '🏆' : tab === 'duties' ? '📌' : '📋'}</span>
+              <span className="text-xl">{tab === 'award' ? '🏆' : tab === 'competitions' ? '🥇' : tab === 'duties' ? '📌' : '📋'}</span>
               <span className="text-xs font-medium capitalize">
-                {tab === 'duties' ? 'Duties' : t(`nav.${tab}`)}
+                {tab === 'duties' ? 'Duties' : tab === 'competitions' ? 'Competitions' : t(`nav.${tab}`)}
               </span>
             </button>
           ))}
@@ -731,7 +875,7 @@ export default function VolunteerApp() {
       <ConfirmDialog
         open={confirmOpen}
         title={t('volunteer.confirmAction')}
-        message={`${action === 'give' ? t('volunteer.givingPoints') : t('volunteer.takingPoints')} ${selectedReason?.pts} ${t('common.points')} ${t('volunteer.from')} ${selectedStudent?.name} — ${selectedReason ? t(`reasons.${selectedReason.key}`) : ''}${otherText ? ': ' + otherText : ''}`}
+        message={`${action === 'give' ? t('volunteer.givingPoints') : t('volunteer.takingPoints')} ${selectedReason?.pts} ${t('common.points')} ${t('volunteer.from')} ${selectedStudent?.name} — ${selectedReason ? (isHindi && selectedReason.label_hi ? selectedReason.label_hi : selectedReason.label_en) : ''}${otherText ? ': ' + otherText : ''}`}
         onConfirm={handleConfirm}
         onCancel={() => setConfirmOpen(false)}
         confirmLabel={t('common.confirm')}

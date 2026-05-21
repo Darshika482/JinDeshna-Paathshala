@@ -16,7 +16,7 @@ export const useConfigStore = create(
       campStartDate: '',
       campEndDate: '',
       campTotalDays: 7,
-      adminPassword: '',
+      adminPassword: 'jindeshna@4',
       coinkeeperPin: '',
       isSetupComplete: true,
       batchClasses: null, // null = use DEFAULT_BATCH_CLASSES
