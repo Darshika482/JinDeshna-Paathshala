@@ -70,25 +70,19 @@ export const usePathshalaStore = create(
         return { success: true };
       },
 
-      deletePathshala: async (id, { deleteStudents = false } = {}) => {
+      deletePathshala: async (id) => {
         const pathshala = get().paathshalas.find(p => p.id === id);
         if (!pathshala) return { success: false, error: 'Pathshala not found' };
 
         const code = pathshala.paathshala_code;
         const linked = get().students.filter(s => s.paathshala_code === code);
 
-        if (deleteStudents && linked.length) {
+        if (linked.length) {
           const { error: studentError } = await supabase
             .from('students')
             .delete()
             .eq('paathshala_code', code);
           if (studentError) return { success: false, error: studentError.message };
-        } else if (linked.length) {
-          const { error: unlinkError } = await supabase
-            .from('students')
-            .update({ paathshala_code: null, pathshala: null })
-            .eq('paathshala_code', code);
-          if (unlinkError) return { success: false, error: unlinkError.message };
         }
 
         const { error } = await supabase.from('paathshalas').delete().eq('id', id);
@@ -100,8 +94,7 @@ export const usePathshalaStore = create(
         }));
         return {
           success: true,
-          deletedStudents: deleteStudents ? linked.length : 0,
-          unlinkedStudents: deleteStudents ? 0 : linked.length,
+          deletedStudents: linked.length,
         };
       },
 

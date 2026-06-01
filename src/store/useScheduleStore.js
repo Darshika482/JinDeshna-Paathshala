@@ -1,11 +1,29 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { mockSchedule } from '../data/mockSchedule.js';
+
+function sanitizeSchedule(schedule) {
+  if (!schedule || typeof schedule !== 'object') return {};
+  const next = {};
+  for (const [day, activities] of Object.entries(schedule)) {
+    const safeDay = Number(day);
+    if (!Number.isFinite(safeDay)) continue;
+    const kept = (Array.isArray(activities) ? activities : []).filter((a) => {
+      const id = String(a?.id || '');
+      // Remove legacy seeded demo records while preserving user-created specials.
+      if (a?.type === 'base') return false;
+      if (/^sch\d+_d\d+$/i.test(id)) return false;
+      if (/^special\d+_d\d+$/i.test(id)) return false;
+      return true;
+    });
+    if (kept.length > 0) next[safeDay] = kept;
+  }
+  return next;
+}
 
 export const useScheduleStore = create(
   persist(
     (set, get) => ({
-      schedule: mockSchedule,
+      schedule: {},
       selectedDay: 1,
 
       setDay: (day) => set({ selectedDay: day }),
@@ -52,15 +70,12 @@ export const useScheduleStore = create(
     }),
     {
       name: 'shivir-schedule',
-      version: 3,
+      version: 4,
       migrate: (persistedState, version) => {
         if (!persistedState || typeof persistedState !== 'object') return persistedState;
-        if (version >= 3) return persistedState;
         const next = { ...persistedState };
-        // Re-seed if the stored schedule is empty (e.g. was wiped by a previous migration)
-        if (!next.schedule || Object.keys(next.schedule).length === 0) {
-          next.schedule = mockSchedule;
-        }
+        // Strip legacy demo schedule entries during migration.
+        next.schedule = sanitizeSchedule(next.schedule);
         return next;
       },
     }

@@ -795,8 +795,11 @@ export default function AdminVolunteers() {
 
   const activityOptions = [
     { value: '', label: 'Unassigned' },
-    ...Object.entries(schedule || {})
-      .flatMap(([, acts]) => (acts || []).map(a => ({ value: a.name, label: a.name })))
+    ...[
+      ...Object.entries(schedule || {})
+        .flatMap(([, acts]) => (acts || []).map(a => ({ value: a.name, label: a.name }))),
+      ...dbEvents.map(ev => ({ value: ev.name, label: ev.time_slot ? `${ev.name} (${ev.time_slot})` : ev.name })),
+    ]
       .filter(a => a.value)
       .filter((a, idx, arr) => arr.findIndex(x => x.value === a.value) === idx),
   ];
