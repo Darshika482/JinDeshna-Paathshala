@@ -318,6 +318,7 @@ function AddStudentModal({ pathshala, onSave, onClose }) {
   const [csvResult, setCsvResult] = useState(null);
   const [tab, setTab] = useState('manual'); // 'manual' | 'csv'
   const [csvDragOver, setCsvDragOver] = useState(false);
+  const [duplicateResolution, setDuplicateResolution] = useState(null); // { rows, duplicates, selectedRowIndexes }
   const fileRef = useRef();
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const normalizeHeader = (v) => String(v ?? '')
@@ -402,6 +403,7 @@ function AddStudentModal({ pathshala, onSave, onClose }) {
   const handleCSVFile = async (file) => {
     if (!file) return;
     setCsvUploading(true);
+    setDuplicateResolution(null);
     try {
       const ext = (file.name.split('.').pop() || '').toLowerCase();
       const rawRows = ext === 'xlsx' ? await parseExcelRows(file) : await parseCSVRows(file);
@@ -410,7 +412,20 @@ function AddStudentModal({ pathshala, onSave, onClose }) {
         toast.error('No valid rows found. Check Student Name column and template headers.');
         return;
       }
-      const result = await importStudentsFromCSV(pathshala, rows);
+      let result = await importStudentsFromCSV(pathshala, rows);
+      if (result.duplicateDetected) {
+        const selectedRowIndexes = [];
+        setDuplicateResolution({
+          rows,
+          duplicates: result.duplicates || [],
+          selectedRowIndexes,
+        });
+        setCsvResult({
+          success: false,
+          error: `${result.duplicateCount} duplicate student${result.duplicateCount !== 1 ? 's' : ''} found. Review and choose which to remove.`,
+        });
+        return;
+      }
       setCsvResult(result);
       if (result.success) toast.success(`${result.count} students imported!`);
       else toast.error(result.error || 'Import failed');
@@ -421,6 +436,60 @@ function AddStudentModal({ pathshala, onSave, onClose }) {
       setCsvUploading(false);
     }
     if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const toggleDuplicateRow = (rowIndex) => {
+    setDuplicateResolution(prev => {
+      if (!prev) return prev;
+      const exists = prev.selectedRowIndexes.includes(rowIndex);
+      return {
+        ...prev,
+        selectedRowIndexes: exists
+          ? prev.selectedRowIndexes.filter(i => i !== rowIndex)
+          : [...prev.selectedRowIndexes, rowIndex],
+      };
+    });
+  };
+
+  const setAllDuplicateRows = (checked) => {
+    setDuplicateResolution(prev => {
+      if (!prev) return prev;
+      const allIndexes = [...new Set(prev.duplicates.map(d => d.rowIndex).filter(i => Number.isInteger(i)))];
+      return {
+        ...prev,
+        selectedRowIndexes: checked ? allIndexes : [],
+      };
+    });
+  };
+
+  const handleDuplicateResolutionImport = async () => {
+    if (!duplicateResolution) return;
+    const selectedToImport = new Set(duplicateResolution.selectedRowIndexes);
+    const duplicateIndexes = new Set(
+      duplicateResolution.duplicates
+        .map(d => d.rowIndex)
+        .filter(i => Number.isInteger(i))
+    );
+    const rowsToImport = duplicateResolution.rows.filter((_, idx) => (
+      !duplicateIndexes.has(idx) || selectedToImport.has(idx)
+    ));
+    if (!rowsToImport.length) {
+      toast.error('No students left to import after removing selected duplicates.');
+      return;
+    }
+    setCsvUploading(true);
+    try {
+      const result = await importStudentsFromCSV(pathshala, rowsToImport, { allowDuplicates: true });
+      setCsvResult(result);
+      if (result.success) {
+        toast.success(`${result.count} students imported!`);
+        setDuplicateResolution(null);
+      } else {
+        toast.error(result.error || 'Import failed');
+      }
+    } finally {
+      setCsvUploading(false);
+    }
   };
 
   const handleCSVDrop = (e) => {
@@ -620,6 +689,84 @@ function AddStudentModal({ pathshala, onSave, onClose }) {
           </div>
         )}
       </div>
+
+      {duplicateResolution && (
+        <div className="fixed inset-0 bg-black/55 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl border border-gray-200 overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-saffron-50 to-white">
+              <h3 className="text-base font-bold text-gray-900">Duplicate students found</h3>
+              <p className="text-xs text-gray-600 mt-1">
+                Select duplicate students you still want to import. Unselected duplicate rows will be skipped.
+              </p>
+            </div>
+            <div className="px-5 py-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm text-gray-700">
+                  {duplicateResolution.duplicates.length} duplicate row{duplicateResolution.duplicates.length !== 1 ? 's' : ''} detected
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAllDuplicateRows(true)}
+                    className="px-2.5 py-1 rounded-lg border border-gray-300 text-xs text-gray-700 hover:bg-gray-50"
+                  >
+                    Select all
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAllDuplicateRows(false)}
+                    className="px-2.5 py-1 rounded-lg border border-gray-300 text-xs text-gray-700 hover:bg-gray-50"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+              <div className="max-h-72 overflow-y-auto border border-gray-200 rounded-xl divide-y divide-gray-100">
+                {duplicateResolution.duplicates.map((dup, idx) => {
+                  const checked = duplicateResolution.selectedRowIndexes.includes(dup.rowIndex);
+                  return (
+                    <label key={`${dup.rowIndex}_${idx}`} className="flex items-start gap-3 px-3 py-2.5 cursor-pointer hover:bg-gray-50">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleDuplicateRow(dup.rowIndex)}
+                        className="mt-1"
+                      />
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-gray-900">{dup.name || 'Unnamed student'}</div>
+                        <div className="text-xs text-gray-600">
+                          {dup.parent_name || 'No parent name'}{dup.mobile ? ` · ${dup.mobile}` : ''}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="text-xs text-gray-500 mt-3">
+                {duplicateResolution.selectedRowIndexes.length} duplicate row{duplicateResolution.selectedRowIndexes.length !== 1 ? 's' : ''} selected to import · {duplicateResolution.duplicates.length - duplicateResolution.selectedRowIndexes.length} duplicate row{duplicateResolution.duplicates.length - duplicateResolution.selectedRowIndexes.length !== 1 ? 's' : ''} will be skipped
+              </div>
+            </div>
+            <div className="px-5 py-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDuplicateResolution(null)}
+                disabled={csvUploading}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-sm hover:bg-gray-100 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDuplicateResolutionImport}
+                disabled={csvUploading}
+                className="px-4 py-2 rounded-lg bg-forest-700 text-white text-sm font-semibold hover:bg-forest-800 disabled:opacity-50"
+              >
+                {csvUploading ? 'Importing…' : 'Import Selected'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -954,7 +1101,17 @@ export default function AdminPathshala() {
     : 0;
 
   const handleAddStudent = async (form) => {
-    const r = await addStudentToPathshala(addStudentsFor, form);
+    let r = await addStudentToPathshala(addStudentsFor, form);
+    if (r.duplicateDetected) {
+      const dup = (r.duplicates || [])[0];
+      const msg = `Duplicate student detected:\n\n${dup?.name || form.name}${dup?.parent_name ? ` (${dup.parent_name})` : ''}${dup?.mobile ? ` - ${dup.mobile}` : ''}\n\nClick OK to still add this student, or Cancel to stop.`;
+      const shouldContinue = window.confirm(msg);
+      if (!shouldContinue) {
+        toast('Student not added due to duplicate');
+        return;
+      }
+      r = await addStudentToPathshala(addStudentsFor, form, { allowDuplicate: true });
+    }
     if (r.success) toast.success(`Added! Roll No: ${r.rollNo}`);
     else toast.error(r.error);
   };
