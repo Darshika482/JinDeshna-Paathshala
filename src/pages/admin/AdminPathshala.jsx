@@ -317,8 +317,80 @@ function AddStudentModal({ pathshala, onSave, onClose }) {
   const [csvUploading, setCsvUploading] = useState(false);
   const [csvResult, setCsvResult] = useState(null);
   const [tab, setTab] = useState('manual'); // 'manual' | 'csv'
+  const [csvDragOver, setCsvDragOver] = useState(false);
+  const [duplicateResolution, setDuplicateResolution] = useState(null); // { rows, duplicates, selectedRowIndexes }
   const fileRef = useRef();
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const normalizeHeader = (v) => String(v ?? '')
+    .replace(/\uFEFF/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+  const toText = (v) => {
+    if (v == null) return '';
+    if (typeof v === 'object') {
+      if (typeof v.text === 'string') return v.text;
+      if (typeof v.result === 'string' || typeof v.result === 'number') return String(v.result);
+      if (typeof v.richText === 'object' && Array.isArray(v.richText)) return v.richText.map(x => x?.text || '').join('');
+    }
+    return String(v);
+  };
+  const toStudentRows = (rawRows) => rawRows
+    .map((r) => {
+      const row = Object.entries(r || {}).reduce((acc, [k, v]) => {
+        acc[normalizeHeader(k)] = toText(v).trim();
+        return acc;
+      }, {});
+      const ageNum = parseInt(row['age'], 10);
+      return {
+        name: row['student name'] || row['name'] || '',
+        parent_name: row['father mother s name'] || row['father name'] || row['parent name'] || '',
+        mobile: row['mobile number'] || row['mobile'] || '',
+        gender: row['gender'] || '',
+        age: Number.isNaN(ageNum) ? undefined : ageNum,
+        age_group: normalizeAgeGroup(row['age group'] || ''),
+        class_group: row['class group'] || '',
+      };
+    })
+    .filter(r => r.name);
+  const parseCSVRows = (file) => new Promise((resolve, reject) => {
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: ({ data, errors }) => {
+        if (errors?.length) {
+          reject(new Error(errors[0].message || 'Failed to parse CSV'));
+          return;
+        }
+        resolve(data || []);
+      },
+      error: reject,
+    });
+  });
+  const parseExcelRows = async (file) => {
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await file.arrayBuffer());
+    const ws = wb.worksheets.find(sheet => !sheet.name.startsWith('_') && sheet.actualRowCount > 0) || wb.worksheets[0];
+    if (!ws) return [];
+    const headers = ws.getRow(1).values.slice(1).map(v => toText(v).trim());
+    const rows = [];
+    for (let r = 2; r <= ws.rowCount; r++) {
+      const row = ws.getRow(r);
+      const obj = {};
+      let hasValue = false;
+      headers.forEach((header, idx) => {
+        if (!header) return;
+        const value = row.getCell(idx + 1).value;
+        const text = toText(value).trim();
+        if (text) hasValue = true;
+        obj[header] = text;
+      });
+      if (hasValue) rows.push(obj);
+    }
+    return rows;
+  };
 
   const handleManualSave = async (e) => {
     e.preventDefault();
@@ -331,27 +403,108 @@ function AddStudentModal({ pathshala, onSave, onClose }) {
   const handleCSVFile = async (file) => {
     if (!file) return;
     setCsvUploading(true);
-    Papa.parse(file, {
-      header: true, skipEmptyLines: true,
-      complete: async ({ data }) => {
-        const rows = data.map(r => ({
-          name:        (r['Student Name']||r['Name']||'').trim(),
-          parent_name: (r["Father/Mother's Name"]||r['Father Name']||r['Parent Name']||'').trim(),
-          mobile:      (r['Mobile Number']||r['Mobile']||'').trim(),
-          gender:      (r['Gender']||'').trim(),
-          age:          r['Age'] ? parseInt(r['Age']) : undefined,
-          age_group:   normalizeAgeGroup(r['Age Group']||''),
-          class_group: (r['Class Group']||'').trim(),
-        })).filter(r => r.name);
-        if (!rows.length) { toast.error('No valid rows found'); setCsvUploading(false); return; }
-        const result = await importStudentsFromCSV(pathshala, rows);
-        setCsvResult(result);
-        if (result.success) toast.success(`${result.count} students imported!`);
-        else toast.error(result.error || 'Import failed');
-        setCsvUploading(false);
-      },
-    });
+    setDuplicateResolution(null);
+    try {
+      const ext = (file.name.split('.').pop() || '').toLowerCase();
+      const rawRows = ext === 'xlsx' ? await parseExcelRows(file) : await parseCSVRows(file);
+      const rows = toStudentRows(rawRows);
+      if (!rows.length) {
+        toast.error('No valid rows found. Check Student Name column and template headers.');
+        return;
+      }
+      let result = await importStudentsFromCSV(pathshala, rows);
+      if (result.duplicateDetected) {
+        const selectedRowIndexes = [];
+        setDuplicateResolution({
+          rows,
+          duplicates: result.duplicates || [],
+          selectedRowIndexes,
+        });
+        setCsvResult({
+          success: false,
+          error: `${result.duplicateCount} duplicate student${result.duplicateCount !== 1 ? 's' : ''} found. Review and choose which to remove.`,
+        });
+        return;
+      }
+      setCsvResult(result);
+      if (result.success) toast.success(`${result.count} students imported!`);
+      else toast.error(result.error || 'Import failed');
+    } catch (err) {
+      toast.error('Failed to read file. Please upload template CSV or XLSX.');
+      console.error(err);
+    } finally {
+      setCsvUploading(false);
+    }
     if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const toggleDuplicateRow = (rowIndex) => {
+    setDuplicateResolution(prev => {
+      if (!prev) return prev;
+      const exists = prev.selectedRowIndexes.includes(rowIndex);
+      return {
+        ...prev,
+        selectedRowIndexes: exists
+          ? prev.selectedRowIndexes.filter(i => i !== rowIndex)
+          : [...prev.selectedRowIndexes, rowIndex],
+      };
+    });
+  };
+
+  const setAllDuplicateRows = (checked) => {
+    setDuplicateResolution(prev => {
+      if (!prev) return prev;
+      const allIndexes = [...new Set(prev.duplicates.map(d => d.rowIndex).filter(i => Number.isInteger(i)))];
+      return {
+        ...prev,
+        selectedRowIndexes: checked ? allIndexes : [],
+      };
+    });
+  };
+
+  const handleDuplicateResolutionImport = async () => {
+    if (!duplicateResolution) return;
+    const selectedToImport = new Set(duplicateResolution.selectedRowIndexes);
+    const duplicateIndexes = new Set(
+      duplicateResolution.duplicates
+        .map(d => d.rowIndex)
+        .filter(i => Number.isInteger(i))
+    );
+    const rowsToImport = duplicateResolution.rows.filter((_, idx) => (
+      !duplicateIndexes.has(idx) || selectedToImport.has(idx)
+    ));
+    if (!rowsToImport.length) {
+      toast.error('No students left to import after removing selected duplicates.');
+      return;
+    }
+    setCsvUploading(true);
+    try {
+      const result = await importStudentsFromCSV(pathshala, rowsToImport, { allowDuplicates: true });
+      setCsvResult(result);
+      if (result.success) {
+        toast.success(`${result.count} students imported!`);
+        setDuplicateResolution(null);
+      } else {
+        toast.error(result.error || 'Import failed');
+      }
+    } finally {
+      setCsvUploading(false);
+    }
+  };
+
+  const handleCSVDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCsvDragOver(false);
+    if (csvUploading) return;
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleCSVFile(file);
+  };
+
+  const handleCSVDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!csvUploading) e.dataTransfer.dropEffect = 'copy';
   };
 
   const downloadStudentTemplate = async () => {
@@ -508,10 +661,20 @@ function AddStudentModal({ pathshala, onSave, onClose }) {
               </div>
             </button>
 
-            <label className="w-full flex items-center gap-3 border-2 border-dashed border-saffron-300 hover:border-saffron-500 rounded-xl p-4 text-left transition-colors cursor-pointer bg-saffron-50 hover:bg-saffron-100">
+            <label
+              className={`w-full flex items-center gap-3 border-2 border-dashed rounded-xl p-4 text-left transition-colors cursor-pointer ${
+                csvDragOver
+                  ? 'border-saffron-500 bg-saffron-100'
+                  : 'border-saffron-300 hover:border-saffron-500 bg-saffron-50 hover:bg-saffron-100'
+              } ${csvUploading ? 'opacity-60 pointer-events-none' : ''}`}
+              onDragEnter={(e) => { e.preventDefault(); if (!csvUploading) setCsvDragOver(true); }}
+              onDragOver={handleCSVDragOver}
+              onDragLeave={(e) => { e.preventDefault(); if (!e.currentTarget.contains(e.relatedTarget)) setCsvDragOver(false); }}
+              onDrop={handleCSVDrop}
+            >
               <div className="text-2xl">📤</div>
               <div className="flex-1">
-                <div className="font-semibold text-sm text-gray-800">{csvUploading ? 'Uploading…' : 'Upload Filled CSV / Excel'}</div>
+                <div className="font-semibold text-sm text-gray-800">{csvUploading ? 'Uploading…' : csvDragOver ? 'Drop file to upload' : 'Upload Filled CSV / Excel'}</div>
                 <div className="text-xs text-gray-500">Click to browse or drop your .csv or .xlsx file here</div>
               </div>
               <input ref={fileRef} type="file" accept=".csv,.xlsx" className="hidden" onChange={e => handleCSVFile(e.target.files?.[0])} disabled={csvUploading} />
@@ -526,6 +689,84 @@ function AddStudentModal({ pathshala, onSave, onClose }) {
           </div>
         )}
       </div>
+
+      {duplicateResolution && (
+        <div className="fixed inset-0 bg-black/55 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl border border-gray-200 overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-saffron-50 to-white">
+              <h3 className="text-base font-bold text-gray-900">Duplicate students found</h3>
+              <p className="text-xs text-gray-600 mt-1">
+                Select duplicate students you still want to import. Unselected duplicate rows will be skipped.
+              </p>
+            </div>
+            <div className="px-5 py-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm text-gray-700">
+                  {duplicateResolution.duplicates.length} duplicate row{duplicateResolution.duplicates.length !== 1 ? 's' : ''} detected
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAllDuplicateRows(true)}
+                    className="px-2.5 py-1 rounded-lg border border-gray-300 text-xs text-gray-700 hover:bg-gray-50"
+                  >
+                    Select all
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAllDuplicateRows(false)}
+                    className="px-2.5 py-1 rounded-lg border border-gray-300 text-xs text-gray-700 hover:bg-gray-50"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+              <div className="max-h-72 overflow-y-auto border border-gray-200 rounded-xl divide-y divide-gray-100">
+                {duplicateResolution.duplicates.map((dup, idx) => {
+                  const checked = duplicateResolution.selectedRowIndexes.includes(dup.rowIndex);
+                  return (
+                    <label key={`${dup.rowIndex}_${idx}`} className="flex items-start gap-3 px-3 py-2.5 cursor-pointer hover:bg-gray-50">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleDuplicateRow(dup.rowIndex)}
+                        className="mt-1"
+                      />
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-gray-900">{dup.name || 'Unnamed student'}</div>
+                        <div className="text-xs text-gray-600">
+                          {dup.parent_name || 'No parent name'}{dup.mobile ? ` · ${dup.mobile}` : ''}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="text-xs text-gray-500 mt-3">
+                {duplicateResolution.selectedRowIndexes.length} duplicate row{duplicateResolution.selectedRowIndexes.length !== 1 ? 's' : ''} selected to import · {duplicateResolution.duplicates.length - duplicateResolution.selectedRowIndexes.length} duplicate row{duplicateResolution.duplicates.length - duplicateResolution.selectedRowIndexes.length !== 1 ? 's' : ''} will be skipped
+              </div>
+            </div>
+            <div className="px-5 py-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDuplicateResolution(null)}
+                disabled={csvUploading}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-sm hover:bg-gray-100 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDuplicateResolutionImport}
+                disabled={csvUploading}
+                className="px-4 py-2 rounded-lg bg-forest-700 text-white text-sm font-semibold hover:bg-forest-800 disabled:opacity-50"
+              >
+                {csvUploading ? 'Importing…' : 'Import Selected'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -623,7 +864,7 @@ function EditStudentModal({ student, pathshala, onSave, onClose }) {
 }
 
 // ─── Delete Pathshala Modal ───────────────────────────────────────────────────
-function DeletePathshalaModal({ pathshala, studentCount, deleting, onDeleteOnly, onDeleteWithStudents, onClose }) {
+function DeletePathshalaModal({ pathshala, studentCount, deleting, onConfirmDelete, onClose }) {
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl fade-in border border-gray-100 overflow-hidden">
@@ -653,7 +894,7 @@ function DeletePathshalaModal({ pathshala, studentCount, deleting, onDeleteOnly,
             <div className="text-sm font-semibold text-gray-900 mt-0.5">{pathshala.paathshala_name}</div>
           </div>
 
-          <p className="text-gray-600 text-sm mb-1">Choose what should happen to linked students:</p>
+          <p className="text-gray-600 text-sm mb-1">Deleting a pathshala also deletes all linked students.</p>
           {studentCount > 0 ? (
             <p className="text-gray-500 text-sm mb-4">
               <span className="font-semibold text-gray-800">{studentCount} student{studentCount !== 1 ? 's are' : ' is'}</span> currently linked.
@@ -662,58 +903,32 @@ function DeletePathshalaModal({ pathshala, studentCount, deleting, onDeleteOnly,
             <p className="text-gray-500 text-sm mb-4">No students are linked to this pathshala.</p>
           )}
 
-          <div className="space-y-3">
-            <div className="rounded-xl border border-forest-200 bg-forest-50/50 p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2 font-semibold text-forest-800">
-                    <span>🗂️</span>
-                    <span>Delete pathshala only</span>
-                  </div>
-                  <div className="text-xs text-forest-700/80 mt-1">
-                    {studentCount > 0
-                      ? 'Students remain in the system and are simply unlinked.'
-                      : 'Remove this pathshala record.'}
-                  </div>
+          <div className="rounded-xl border border-red-300 bg-red-50 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 font-semibold text-red-700">
+                  <span>🗑️</span>
+                  <span>Delete pathshala and students</span>
                 </div>
-                <button
-                  type="button"
-                  disabled={deleting}
-                  onClick={onDeleteOnly}
-                  className="px-3 py-2 rounded-lg bg-forest-700 text-white text-xs font-semibold hover:bg-forest-800 disabled:opacity-50 whitespace-nowrap"
-                >
-                  Continue
-                </button>
+                <div className="text-xs text-red-600/90 mt-1">
+                  {studentCount > 0
+                    ? `Permanently delete this pathshala and all ${studentCount} linked student${studentCount !== 1 ? 's' : ''}.`
+                    : 'Permanently delete this pathshala record.'}
+                </div>
               </div>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={onConfirmDelete}
+                className="px-3 py-2 rounded-lg bg-red-600 text-white text-xs font-semibold hover:bg-red-700 disabled:opacity-50 whitespace-nowrap"
+              >
+                Delete All
+              </button>
             </div>
-
-            {studentCount > 0 && (
-              <div className="rounded-xl border border-red-300 bg-red-50 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2 font-semibold text-red-700">
-                      <span>🗑️</span>
-                      <span>Delete pathshala and students</span>
-                    </div>
-                    <div className="text-xs text-red-600/90 mt-1">
-                      Permanently delete this pathshala and all {studentCount} linked student{studentCount !== 1 ? 's' : ''}.
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={deleting}
-                    onClick={onDeleteWithStudents}
-                    className="px-3 py-2 rounded-lg bg-red-600 text-white text-xs font-semibold hover:bg-red-700 disabled:opacity-50 whitespace-nowrap"
-                  >
-                    Delete All
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
 
           <div className="mt-5 pt-4 border-t border-gray-100 flex items-center justify-between gap-2">
-            <p className="text-[11px] text-gray-400">{deleting ? 'Applying changes...' : 'No action is taken until you choose an option.'}</p>
+            <p className="text-[11px] text-gray-400">{deleting ? 'Applying changes...' : 'No action is taken until you confirm delete.'}</p>
             <button
               type="button"
               disabled={deleting}
@@ -859,17 +1074,15 @@ export default function AdminPathshala() {
     }
   };
 
-  const handleDelete = async (deleteStudents = false) => {
+  const handleDelete = async () => {
     if (!deleteId) return;
     const target = paathshalas.find(p => p.id === deleteId);
     setDeletingPathshala(true);
-    const r = await deletePathshala(deleteId, { deleteStudents });
+    const r = await deletePathshala(deleteId);
     setDeletingPathshala(false);
     if (r.success) {
-      if (deleteStudents && r.deletedStudents) {
+      if (r.deletedStudents) {
         toast.success(`Pathshala deleted along with ${r.deletedStudents} student${r.deletedStudents !== 1 ? 's' : ''}`);
-      } else if (r.unlinkedStudents) {
-        toast.success(`Pathshala deleted. ${r.unlinkedStudents} student${r.unlinkedStudents !== 1 ? 's' : ''} kept and unlinked.`);
       } else {
         toast.success('Pathshala deleted');
       }
@@ -888,7 +1101,17 @@ export default function AdminPathshala() {
     : 0;
 
   const handleAddStudent = async (form) => {
-    const r = await addStudentToPathshala(addStudentsFor, form);
+    let r = await addStudentToPathshala(addStudentsFor, form);
+    if (r.duplicateDetected) {
+      const dup = (r.duplicates || [])[0];
+      const msg = `Duplicate student detected:\n\n${dup?.name || form.name}${dup?.parent_name ? ` (${dup.parent_name})` : ''}${dup?.mobile ? ` - ${dup.mobile}` : ''}\n\nClick OK to still add this student, or Cancel to stop.`;
+      const shouldContinue = window.confirm(msg);
+      if (!shouldContinue) {
+        toast('Student not added due to duplicate');
+        return;
+      }
+      r = await addStudentToPathshala(addStudentsFor, form, { allowDuplicate: true });
+    }
     if (r.success) toast.success(`Added! Roll No: ${r.rollNo}`);
     else toast.error(r.error);
   };
@@ -1179,8 +1402,7 @@ export default function AdminPathshala() {
           pathshala={deletePathshalaTarget}
           studentCount={deletePathshalaStudentCount}
           deleting={deletingPathshala}
-          onDeleteOnly={() => handleDelete(false)}
-          onDeleteWithStudents={() => handleDelete(true)}
+          onConfirmDelete={handleDelete}
           onClose={() => !deletingPathshala && setDeleteId(null)}
         />
       )}

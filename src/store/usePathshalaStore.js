@@ -2,6 +2,27 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { supabase } from '../lib/supabase.js';
 
+function normalizeForDuplicate(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function buildStudentDuplicateKey(pathshalaCode, studentLike) {
+  const code = String(pathshalaCode || '').trim();
+  const name = normalizeForDuplicate(studentLike?.name);
+  const parent = normalizeForDuplicate(studentLike?.parent_name || studentLike?.father_name);
+  const mobile = normalizeForDuplicate(studentLike?.mobile);
+  return `${code}|${name}|${parent}|${mobile}`;
+}
+
+function isDuplicateInputIncomplete(studentLike) {
+  const name = normalizeForDuplicate(studentLike?.name);
+  const parent = normalizeForDuplicate(studentLike?.parent_name || studentLike?.father_name);
+  const mobile = normalizeForDuplicate(studentLike?.mobile);
+  // Name is required separately; duplicate checks only run when at least one
+  // additional identifier is present to reduce false positives.
+  return !name || (!parent && !mobile);
+}
+
 function generatePathshalaCode(existing) {
   const codes = existing.map(p => parseInt(p.paathshala_code, 10)).filter(n => !isNaN(n));
   const max = codes.length ? Math.max(...codes) : 0;
@@ -70,25 +91,19 @@ export const usePathshalaStore = create(
         return { success: true };
       },
 
-      deletePathshala: async (id, { deleteStudents = false } = {}) => {
+      deletePathshala: async (id) => {
         const pathshala = get().paathshalas.find(p => p.id === id);
         if (!pathshala) return { success: false, error: 'Pathshala not found' };
 
         const code = pathshala.paathshala_code;
         const linked = get().students.filter(s => s.paathshala_code === code);
 
-        if (deleteStudents && linked.length) {
+        if (linked.length) {
           const { error: studentError } = await supabase
             .from('students')
             .delete()
             .eq('paathshala_code', code);
           if (studentError) return { success: false, error: studentError.message };
-        } else if (linked.length) {
-          const { error: unlinkError } = await supabase
-            .from('students')
-            .update({ paathshala_code: null, pathshala: null })
-            .eq('paathshala_code', code);
-          if (unlinkError) return { success: false, error: unlinkError.message };
         }
 
         const { error } = await supabase.from('paathshalas').delete().eq('id', id);
@@ -100,13 +115,30 @@ export const usePathshalaStore = create(
         }));
         return {
           success: true,
-          deletedStudents: deleteStudents ? linked.length : 0,
-          unlinkedStudents: deleteStudents ? 0 : linked.length,
+          deletedStudents: linked.length,
         };
       },
 
-      addStudentToPathshala: async (pathshala, studentData) => {
+      addStudentToPathshala: async (pathshala, studentData, options = {}) => {
+        const { allowDuplicate = false } = options;
         const { students } = get();
+        const duplicateKey = buildStudentDuplicateKey(pathshala.paathshala_code, studentData);
+        const hasDuplicate = !isDuplicateInputIncomplete(studentData)
+          && students.some(s => buildStudentDuplicateKey(pathshala.paathshala_code, s) === duplicateKey);
+        if (hasDuplicate && !allowDuplicate) {
+          return {
+            success: false,
+            duplicateDetected: true,
+            duplicateCount: 1,
+            duplicates: [{
+              name: String(studentData.name || '').trim(),
+              parent_name: String(studentData.parent_name || '').trim(),
+              mobile: String(studentData.mobile || '').trim(),
+            }],
+            error: 'Duplicate student detected',
+          };
+        }
+
         const rollNo = generateRollNo(pathshala.paathshala_code, students);
         const newStudent = {
           id: `s_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -131,10 +163,45 @@ export const usePathshalaStore = create(
         return { success: true, rollNo };
       },
 
-      importStudentsFromCSV: async (pathshala, rows) => {
+      importStudentsFromCSV: async (pathshala, rows, options = {}) => {
+        const { allowDuplicates = false } = options;
         // rows: [{ name, parent_name, mobile }]
         const { students } = get();
         const pp = String(pathshala.paathshala_code).padStart(2, '0');
+        const existingKeys = new Set(
+          students
+            .filter(s => s.paathshala_code === pathshala.paathshala_code)
+            .map(s => buildStudentDuplicateKey(pathshala.paathshala_code, s))
+        );
+        const fileSeen = new Set();
+        const duplicateRows = [];
+
+        rows.forEach((row, rowIndex) => {
+          if (isDuplicateInputIncomplete(row)) return;
+          const key = buildStudentDuplicateKey(pathshala.paathshala_code, row);
+          const duplicateInSystem = existingKeys.has(key);
+          const duplicateInFile = fileSeen.has(key);
+          if (duplicateInSystem || duplicateInFile) {
+            duplicateRows.push({
+              rowIndex,
+              name: String(row.name || '').trim(),
+              parent_name: String(row.parent_name || '').trim(),
+              mobile: String(row.mobile || '').trim(),
+            });
+          }
+          fileSeen.add(key);
+        });
+
+        if (duplicateRows.length > 0 && !allowDuplicates) {
+          return {
+            success: false,
+            duplicateDetected: true,
+            duplicateCount: duplicateRows.length,
+            duplicates: duplicateRows,
+            error: 'Duplicate students detected',
+            count: 0,
+          };
+        }
 
         // Find current max seq for this paathshala
         const siblings = students.filter(s => s.paathshala_code === pathshala.paathshala_code);
