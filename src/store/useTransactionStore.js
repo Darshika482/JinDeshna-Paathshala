@@ -32,7 +32,7 @@ function withSyncStatus(tx, status = TX_PENDING) {
 }
 
 function toRemoteTransactionPayload(tx) {
-  const { sync_status, ...payload } = tx || {};
+  const { sync_status, roll_no, ...payload } = tx || {};
   return payload;
 }
 

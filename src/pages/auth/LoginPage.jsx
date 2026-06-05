@@ -19,7 +19,7 @@ export default function LoginPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { loginVolunteer, loginAdmin, loginCoinkeeper } = useAuthStore();
+  const { loginVolunteer, loginAdmin, loginCoinkeeper, currentUser, role, _hasHydrated } = useAuthStore();
   const campName = useConfigStore(s => s.campName) || import.meta.env.VITE_CAMP_NAME || t('app.title');
   const campCity = useConfigStore(s => s.campCity) || import.meta.env.VITE_CAMP_CITY || t('app.subtitle');
 
@@ -27,6 +27,29 @@ export default function LoginPage() {
   const [pin, setPin] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!_hasHydrated) return;
+    if (currentUser && role) {
+      if (role === 'admin') {
+        if (sessionStorage.getItem('admin_session_active') === 'true') {
+          navigate('/admin', { replace: true });
+        }
+      } else {
+        const roleRouteMap = {
+          volunteer: '/mentor/actions',
+          teacher: '/teacher',
+          coordinator: '/coordinator',
+          coinkeeper: '/coinkeeper',
+          collection: '/collection',
+        };
+        const targetRoute = roleRouteMap[role];
+        if (targetRoute) {
+          navigate(targetRoute, { replace: true });
+        }
+      }
+    }
+  }, [currentUser, role, _hasHydrated, navigate]);
 
   useEffect(() => {
     const roleFromQueryRaw = (searchParams.get('role') || '').trim();

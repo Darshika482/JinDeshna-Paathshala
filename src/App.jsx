@@ -39,8 +39,20 @@ function AppInitializer() {
 }
 
 function RequireAuth({ children, allowedRoles }) {
-  const { currentUser, role, _hasHydrated } = useAuthStore();
+  const { currentUser, role, _hasHydrated, logout } = useAuthStore();
+
+  useEffect(() => {
+    if (_hasHydrated && role === 'admin' && !sessionStorage.getItem('admin_session_active')) {
+      logout();
+    }
+  }, [_hasHydrated, role, logout]);
+
   if (!_hasHydrated) return null;
+
+  if (role === 'admin' && !sessionStorage.getItem('admin_session_active')) {
+    return <Navigate to="/login" replace />;
+  }
+
   if (!currentUser) return <Navigate to="/login" replace />;
   if (allowedRoles && !allowedRoles.includes(role)) return <Navigate to="/login" replace />;
   return children;

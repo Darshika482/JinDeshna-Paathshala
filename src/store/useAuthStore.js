@@ -220,6 +220,11 @@ export const useAuthStore = create(
 
       loginAdmin: (password) => {
         if (password !== getAdminPassword()) return { success: false, error: 'Wrong password.' };
+        try {
+          sessionStorage.setItem('admin_session_active', 'true');
+        } catch (e) {
+          console.error('sessionStorage is not available', e);
+        }
         set({ currentUser: { id: 'admin', name: 'Camp Admin', role: 'Admin' }, role: 'admin' });
         return { success: true };
       },
@@ -232,7 +237,12 @@ export const useAuthStore = create(
         return { success: true };
       },
 
-      logout: () => set({ currentUser: null, role: null }),
+      logout: () => {
+        try {
+          sessionStorage.removeItem('admin_session_active');
+        } catch (e) {}
+        set({ currentUser: null, role: null });
+      },
 
       refreshCurrentUser: async () => {
         const state = useAuthStore.getState();
