@@ -8,8 +8,6 @@ import LanguageToggle from '../../components/common/LanguageToggle.jsx';
 const ROLES = [
   { key: 'mentor', icon: '🙋', routeAfter: '/mentor/actions', pinLogin: true },
   { key: 'teacher', icon: '📝', routeAfter: '/teacher', pinLogin: true },
-  { key: 'coordinator', icon: '🎯', routeAfter: '/coordinator', pinLogin: true },
-  { key: 'coinkeeper', icon: '🪙', routeAfter: '/coinkeeper', pinLogin: true, keeperPin: true },
   { key: 'collection', icon: '📦', routeAfter: '/collection', pinLogin: true },
   { key: 'checkin', icon: '✅', routeAfter: '/checkin', directAccess: true, pinLogin: false },
   { key: 'admin', icon: '🔐', routeAfter: '/admin', pinLogin: false },

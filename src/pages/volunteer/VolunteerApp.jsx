@@ -5,7 +5,7 @@ import { useAuthStore } from '../../store/useAuthStore.js';
 import { useStudentStore } from '../../store/useStudentStore.js';
 import { useTransactionStore } from '../../store/useTransactionStore.js';
 import { usePointReasonsStore } from '../../store/usePointReasonsStore.js';
-import { useCompetitionsStore } from '../../store/useCompetitionsStore.js';
+import { supabase } from '../../lib/supabase.js';
 import LanguageToggle from '../../components/common/LanguageToggle.jsx';
 import ConfirmDialog from '../../components/common/ConfirmDialog.jsx';
 import OfflineBanner from '../../components/common/OfflineBanner.jsx';
@@ -35,7 +35,8 @@ export default function VolunteerApp() {
     getTakeCategory,
     getReasonsForCategory,
   } = usePointReasonsStore();
-  const { fetch: fetchCompetitions, getActive: getActiveCompetitions } = useCompetitionsStore();
+  const [competitionOptions, setCompetitionOptions] = useState([]);
+  const [competitionsLoading, setCompetitionsLoading] = useState(true);
 
   const [activeTab, setActiveTab] = useState('award');
   const [query, setQuery] = useState('');
@@ -66,7 +67,40 @@ export default function VolunteerApp() {
   const behaviourCategory = giveCategories.find(c => c.tx_type === 'Behaviour');
   const BEHAVIOUR_CAP = behaviourCategory?.behaviour_cap ?? 4;
 
-  useEffect(() => { fetchReasons(); fetchCompetitions(); }, [fetchReasons, fetchCompetitions]);
+  useEffect(() => { fetchReasons(); }, [fetchReasons]);
+
+  // Competition list: Operations → Events where event_type = "competition" only.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCompetitions() {
+      setCompetitionsLoading(true);
+      const { data } = await supabase
+        .from('events')
+        .select('id,name,time_slot,event_type,is_active,sort_order,points_per_coin')
+        .eq('event_type', 'competition')
+        .eq('is_active', true)
+        .order('sort_order')
+        .order('name');
+
+      if (cancelled) return;
+
+      setCompetitionOptions(
+        (data || []).map((ev) => ({
+          id: ev.id,
+          name: ev.name,
+          name_hi: null,
+          time_slot: ev.time_slot || '',
+          points: Number(ev.points_per_coin) > 0 ? Number(ev.points_per_coin) : 10,
+          sort_order: Number(ev.sort_order) || 0,
+        })).sort(
+          (a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+        )
+      );
+      setCompetitionsLoading(false);
+    }
+    loadCompetitions();
+    return () => { cancelled = true; };
+  }, []);
 
   // Set initial awardCategory to first give category once loaded
   useEffect(() => {
@@ -570,13 +604,18 @@ export default function VolunteerApp() {
             {compStep === 1 && (
               <>
                 <h2 className="section-header">Select Competition</h2>
-                {getActiveCompetitions().length === 0 && (
+                {competitionsLoading && (
                   <div className="text-center py-10 text-gray-400 bg-white rounded-2xl border border-gray-200">
-                    No competitions configured. Ask admin to add competitions.
+                    Loading competitions…
+                  </div>
+                )}
+                {!competitionsLoading && competitionOptions.length === 0 && (
+                  <div className="text-center py-10 text-gray-400 bg-white rounded-2xl border border-gray-200">
+                    No competition events found. Ask admin to add events with type <strong>Competition</strong> in Operations.
                   </div>
                 )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {getActiveCompetitions().map(comp => (
+                  {competitionOptions.map(comp => (
                     <button
                       key={comp.id}
                       onClick={() => {
@@ -591,6 +630,7 @@ export default function VolunteerApp() {
                     >
                       <div className="font-bold text-gray-900 text-base">🥇 {comp.name}</div>
                       {comp.name_hi && <div className="text-sm text-gray-500 mt-0.5">{comp.name_hi}</div>}
+                      {comp.time_slot && <div className="text-xs text-gray-400 mt-0.5">{comp.time_slot}</div>}
                       <div className="font-bold text-green-600 mt-2">+{comp.points} points</div>
                     </button>
                   ))}

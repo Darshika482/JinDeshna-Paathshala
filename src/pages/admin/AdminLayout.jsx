@@ -14,7 +14,6 @@ import AdminClasses from './AdminClasses.jsx';
 import AdminSettings from './AdminSettings.jsx';
 import AdminPathshala from './AdminPathshala.jsx';
 import AdminPointReasons from './AdminPointReasons.jsx';
-import AdminCompetitions from './AdminCompetitions.jsx';
 import { useConfigStore } from '../../store/useConfigStore.js';
 
 const NAV_ITEMS = [
@@ -25,7 +24,6 @@ const NAV_ITEMS = [
   { key: 'transactions',  icon: '📝', label: 'admin.transactions' },
   { key: 'volunteers',    icon: '🙋', label: 'admin.volunteers' },
   { key: 'pointReasons',  icon: '🎯', label: 'admin.pointReasons' },
-  { key: 'competitions',  icon: '🥇', label: 'admin.competitions' },
   { key: 'operations',    icon: '⚙️', label: 'admin.operations' },
   { key: 'settings',      icon: '🔧', label: 'admin.settings' },
 ];
@@ -38,7 +36,6 @@ const PAGES = {
   transactions:  AdminTransactions,
   volunteers:    AdminVolunteers,
   pointReasons:  AdminPointReasons,
-  competitions:  AdminCompetitions,
   operations:    AdminOperations,
   settings:      AdminSettings,
 };
