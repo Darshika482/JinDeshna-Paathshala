@@ -198,6 +198,7 @@ function EventForm({ initial, onSave, onCancel }) {
           <label className="text-xs text-gray-500 font-medium">Event Type</label>
           <select className="form-input mt-1" value={form.event_type} onChange={e => set('event_type', e.target.value)}>
             <option value="class">Class</option>
+            <option value="competition">Competition</option>
             <option value="daily">Daily</option>
             <option value="one-time">One-Time</option>
             <option value="two-day">Two-Day</option>

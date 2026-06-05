@@ -96,6 +96,20 @@ export const useStudentStore = create(
         }));
       },
 
+      resetAllCheckIns: async () => {
+        const { error } = await supabase
+          .from('students')
+          .update({ checked_in: false, checked_in_at: null })
+          .eq('checked_in', true);
+        if (error) return { success: false, error: error.message };
+        set(state => ({
+          students: state.students.map(s => (
+            s.checked_in ? { ...s, checked_in: false, checked_in_at: null } : s
+          )),
+        }));
+        return { success: true };
+      },
+
       toggleKitGiven: async (id) => {
         const student = get().students.find(s => s.id === id);
         if (!student) return { success: false, error: 'Student not found' };

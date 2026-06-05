@@ -4,11 +4,17 @@ import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase.js';
 import { useVolunteerStore } from '../../store/useVolunteerStore.js';
+import { usePathshalaStore } from '../../store/usePathshalaStore.js';
 import { useScheduleStore } from '../../store/useScheduleStore.js';
 import { useConfigStore, DEFAULT_BATCH_CLASSES } from '../../store/useConfigStore.js';
 import Select from '../../components/common/Select.jsx';
 import ConfirmDialog from '../../components/common/ConfirmDialog.jsx';
 import { buildWhatsAppLink } from '../../lib/whatsapp.js';
+
+const escapeCSV = (cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`;
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>"]/g, (char) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[char]
+));
 
 // Open WhatsApp with a pre-filled login PIN message for this volunteer.
 // Surface a clear toast if mobile or PIN is missing.
@@ -193,12 +199,14 @@ const AVAIL_COLORS = {
 
 export default function AdminVolunteers() {
   const { t } = useTranslation();
-  const { volunteers, addVolunteer, updateVolunteer, deleteVolunteer, importFromCSV } = useVolunteerStore();
+  const { volunteers, addVolunteer, updateVolunteer, deleteVolunteer, importFromCSV, fetchVolunteers } = useVolunteerStore();
+  const { fetchPathashalas, syncAllPaathshalaTeachers } = usePathshalaStore();
   const { schedule } = useScheduleStore();
   const configuredBatchClasses = useConfigStore(s => s.batchClasses) || DEFAULT_BATCH_CLASSES;
 
   const [classSessionEvents, setClassSessionEvents] = useState([]);
   const [dbEvents, setDbEvents] = useState([]);
+  const [syncingTeachers, setSyncingTeachers] = useState(false);
 
   useEffect(() => {
     supabase
@@ -213,6 +221,33 @@ export default function AdminVolunteers() {
         setClassSessionEvents(all.filter(e => e.event_type === 'class'));
       });
   }, []);
+
+  // Auto-register Paathshala teachers as teacher-only mentors when this page
+  // loads, then refresh the list so their names show up automatically.
+  useEffect(() => {
+    (async () => {
+      await fetchPathashalas();
+      await syncAllPaathshalaTeachers();
+      await fetchVolunteers();
+    })();
+  }, []);
+
+  const handleSyncTeachers = async () => {
+    setSyncingTeachers(true);
+    await fetchPathashalas();
+    const r = await syncAllPaathshalaTeachers();
+    await fetchVolunteers();
+    setSyncingTeachers(false);
+    if (r.skipped) {
+      toast('Sync already running…');
+    } else if (r.success) {
+      toast.success(r.added > 0
+        ? `${r.added} Paathshala teacher${r.added !== 1 ? 's' : ''} added`
+        : 'Paathshala teachers synced');
+    } else {
+      toast.error(r.error || 'Failed to sync teachers');
+    }
+  };
 
   const sessionKeys = classSessionEvents.length > 0
     ? classSessionEvents.map((_, i) => String(i + 1))
@@ -705,7 +740,7 @@ export default function AdminVolunteers() {
     setForm(p => ({ ...p, responsibilities: p.responsibilities.filter((_, idx) => idx !== i) }));
   };
 
-  const exportAllMentors = () => {
+  const getMentorExportData = () => {
     const headers = ['Name', 'PIN', 'Mobile', 'City', 'Roles', 'Assigned Classes', 'Has Deduction Rights', 'Availability'];
     const rows = volunteers.map(v => [
       v.name || '',
@@ -717,11 +752,54 @@ export default function AdminVolunteers() {
       v.has_deduction_rights ? 'Yes' : 'No',
       v.availability || '',
     ]);
-    const csv = [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    return { headers, rows };
+  };
+
+  const exportAllMentors = () => {
+    const { headers, rows } = getMentorExportData();
+    const csv = [headers, ...rows].map(r => r.map(escapeCSV).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'mentors-export.csv'; a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const exportMentorsPDF = () => {
+    const { headers, rows } = getMentorExportData();
+    const win = window.open('', '_blank');
+    if (!win) return;
+
+    const thead = headers.map((h, i) => `<th class="${i === headers.length - 1 ? 'num' : ''}">${escapeHtml(h)}</th>`).join('');
+    const tbody = rows.map((r) =>
+      `<tr>${r.map((c, i) => `<td class="${i === headers.length - 1 ? 'num' : ''}">${escapeHtml(c)}</td>`).join('')}</tr>`
+    ).join('');
+
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Mentors Export</title>
+      <style>
+        *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+        body{font-family:'Segoe UI',Arial,sans-serif;color:#1f2937;margin:24px;}
+        h1{font-size:18px;margin:0 0 2px;color:#14532d;}
+        .meta{font-size:11px;color:#6b7280;margin-bottom:14px;}
+        .bar{margin-bottom:14px;}
+        .bar button{font:inherit;padding:8px 16px;border:0;border-radius:8px;background:#ea7c1f;color:#fff;font-weight:600;cursor:pointer;}
+        table{width:100%;border-collapse:collapse;font-size:11px;}
+        th{background:#14532d;color:#fff;text-align:left;padding:7px 9px;}
+        td{padding:6px 9px;border-bottom:1px solid #e5e7eb;}
+        tr:nth-child(even) td{background:#f9fafb;}
+        .num{text-align:right;}
+        th.num{text-align:right;}
+        @media print{button{display:none;}}
+      </style></head><body>
+      <div class="bar"><button onclick="window.print()">Print / Save as PDF</button></div>
+      <h1>Mentors Export</h1>
+      <div class="meta">Generated ${new Date().toLocaleString('en-IN')} · ${rows.length} rows</div>
+      <table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>
+      </body></html>`);
+    win.document.close();
+    win.focus();
+    setTimeout(() => {
+      try { win.print(); } catch { /* user can click print button */ }
+    }, 350);
   };
 
   const downloadMentorTemplate = async () => {
@@ -828,7 +906,9 @@ export default function AdminVolunteers() {
       return v.name?.toLowerCase().includes(q) ||
         v.name_hi?.includes(search) ||
         v.mobile?.includes(search) ||
-        v.city?.toLowerCase().includes(q);
+        v.city?.toLowerCase().includes(q) ||
+        String(v.paathshala || '').toLowerCase().includes(q) ||
+        String(v.paathshala_code || '').toLowerCase().includes(q);
     }
     return true;
   });
@@ -850,6 +930,14 @@ export default function AdminVolunteers() {
           className="text-sm px-3 py-2 rounded-xl border-2 border-gray-200 text-gray-700 hover:border-forest-500 transition-all"
         >
           {showImport ? 'Hide' : 'Bulk Import / Export'}
+        </button>
+        <button
+          onClick={handleSyncTeachers}
+          disabled={syncingTeachers}
+          className="text-sm px-3 py-2 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-all disabled:opacity-50"
+          title="Add Paathshala teachers as teacher-only mentors"
+        >
+          {syncingTeachers ? '⏳ Syncing…' : '👩‍🏫 Sync Paathshala Teachers'}
         </button>
         {/* View toggle */}
         <div className="ml-auto flex gap-0 border-2 border-gray-200 rounded-xl overflow-hidden">
@@ -882,6 +970,12 @@ export default function AdminVolunteers() {
             ⬇ Export All Mentors (.csv)
           </button>
           <button
+            onClick={exportMentorsPDF}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border-2 border-forest-700 bg-forest-700 text-white text-sm font-semibold hover:bg-forest-800 transition-all"
+          >
+            🧾 Export All Mentors (.pdf)
+          </button>
+          <button
             onClick={downloadMentorTemplate}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl border-2 border-saffron-400 bg-saffron-50 text-saffron-800 text-sm font-semibold hover:bg-saffron-100 transition-all"
           >
@@ -909,7 +1003,7 @@ export default function AdminVolunteers() {
           <div className="flex flex-wrap gap-2 mb-4">
             <input
               className="border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-saffron-500 w-full sm:w-56"
-              placeholder="Search name, city, mobile…"
+              placeholder="Search name, city, mobile, Paathshala…"
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
@@ -953,6 +1047,9 @@ export default function AdminVolunteers() {
                   <div className="min-w-0">
                     <div className="font-semibold text-gray-900">{v.name}</div>
                     {v.name_hi && <div className="text-xs text-gray-500">{v.name_hi}</div>}
+                    {v.paathshala && (
+                      <div className="text-[11px] text-saffron-700 font-semibold mt-0.5">🏫 {v.paathshala}</div>
+                    )}
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
                     {v.availability && (
@@ -1031,6 +1128,7 @@ export default function AdminVolunteers() {
                       <td className="px-4 py-3">
                         <div className="font-semibold text-gray-900">{v.name}</div>
                         {v.name_hi && <div className="text-xs text-gray-400">{v.name_hi}</div>}
+                        {v.paathshala && <div className="text-xs text-saffron-700 font-semibold">🏫 {v.paathshala}</div>}
                         {v.city && <div className="text-xs text-gray-400">{v.city}</div>}
                       </td>
                       <td className="px-4 py-3 text-gray-600 font-mono text-xs">{v.mobile || '—'}</td>

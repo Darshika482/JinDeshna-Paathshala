@@ -22,6 +22,60 @@ const normalize = (v) => String(v || '').trim().toLowerCase();
 const normalizeRoll = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const isAttendanceTransaction = (tx) => /attendance\s*[—-]\s*class/i.test(String(tx?.activity || ''));
 
+// ── Export helpers ─────────────────────────────────────────────────────────
+const escapeCSV = (cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`;
+const buildCSVContent = (headers, rows) =>
+  [headers, ...rows].map(r => r.map(escapeCSV).join(',')).join('\n');
+
+const downloadCSV = (filename, content) => {
+  const blob = new Blob(['\ufeff' + content], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+const escapeHtml = (s) => String(s ?? '').replace(/[&<>"]/g, c => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]
+));
+
+const exportPDF = (title, headers, rows) => {
+  const win = window.open('', '_blank');
+  if (!win) return;
+  const thead = headers.map((h, i) => `<th class="${i >= headers.length - 1 ? 'num' : ''}">${escapeHtml(h)}</th>`).join('');
+  const tbody = rows.map(r =>
+    `<tr>${r.map((c, i) => `<td class="${i >= headers.length - 1 ? 'num' : ''}">${escapeHtml(c)}</td>`).join('')}</tr>`
+  ).join('');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+    <style>
+      *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+      body{font-family:'Segoe UI',Arial,sans-serif;color:#1f2937;margin:24px;}
+      h1{font-size:18px;margin:0 0 2px;color:#14532d;}
+      .meta{font-size:11px;color:#6b7280;margin-bottom:14px;}
+      table{width:100%;border-collapse:collapse;font-size:11px;}
+      th{background:#14532d;color:#fff;text-align:left;padding:7px 9px;}
+      td{padding:6px 9px;border-bottom:1px solid #e5e7eb;}
+      tr:nth-child(even) td{background:#f9fafb;}
+      .num{text-align:right;}
+      th.num{text-align:right;}
+      @media print{ button{display:none;} }
+      .bar{margin-bottom:14px;}
+      .bar button{font:inherit;padding:8px 16px;border:0;border-radius:8px;background:#ea7c1f;color:#fff;font-weight:600;cursor:pointer;}
+    </style></head><body>
+    <div class="bar"><button onclick="window.print()">🖨 Print / Save as PDF</button></div>
+    <h1>${escapeHtml(title)}</h1>
+    <div class="meta">Generated ${new Date().toLocaleString('en-IN')} · ${rows.length} rows</div>
+    <table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>
+    </body></html>`);
+  win.document.close();
+  win.focus();
+  setTimeout(() => { try { win.print(); } catch { /* user can use button */ } }, 400);
+};
+
 const normalizeGender = (g) => {
   const v = String(g || '').trim().toLowerCase();
   if (['m', 'male', 'boy', 'boys'].includes(v)) return 'Male';
@@ -463,7 +517,10 @@ export default function AdminLeaderboard() {
   const { transactions } = useTransactionStore();
   const { paathshalas, students: pathshalaStudents } = usePathshalaStore();
 
-  const [activeTab, setActiveTab] = useState('students'); // 'students' | 'paathshala'
+  const [activeTab, setActiveTab] = useState('students'); // 'students' | 'paathshala' | 'competition'
+  const [competitionEvents, setCompetitionEvents] = useState([]);
+  const [selectedComp, setSelectedComp] = useState('');
+  const [compView, setCompView] = useState('students'); // 'students' | 'paathshala'
   const [filterBatch, setFilterBatch] = useState('All');
   const [filterClass, setFilterClass] = useState('All');
   const [filterRoom, setFilterRoom] = useState('All');
@@ -472,6 +529,16 @@ export default function AdminLeaderboard() {
   const [selectedAges, setSelectedAges] = useState(new Set());
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  useEffect(() => {
+    supabase
+      .from('events')
+      .select('id,name,event_type,is_active,sort_order')
+      .eq('event_type', 'competition')
+      .order('sort_order')
+      .order('name')
+      .then(({ data }) => setCompetitionEvents(data || []));
+  }, []);
 
   // Raw attendance points per student (may be inflated: multiple sessions/day)
   const rawAttendanceByStudent = transactions.reduce((acc, tx) => {
@@ -572,34 +639,165 @@ export default function AdminLeaderboard() {
     })
     .sort((a, b) => b.totalPoints - a.totalPoints);
 
+  // ── Competition leaderboard ──────────────────────────────────────────────
+  // Competition points are stored as transactions with type "Competition" and
+  // activity = the competition's name. We list competitions from competition-
+  // type events plus any names that already have competition awards.
+  const competitionTxs = transactions.filter(tx => String(tx.type || '').toLowerCase() === 'competition');
+  const compNamesFromTx = [...new Set(competitionTxs.map(t => String(t.activity || '').trim()).filter(Boolean))];
+  const competitionNames = [...new Set([
+    ...competitionEvents.map(e => String(e.name || '').trim()).filter(Boolean),
+    ...compNamesFromTx,
+  ])].sort(naturalSort);
+  const activeComp = selectedComp || competitionNames[0] || '';
+
+  const compSelNorm = normalize(activeComp);
+  const compPerStudent = {};
+  competitionTxs.forEach(t => {
+    if (normalize(t.activity) !== compSelNorm) return;
+    const sid = String(t.student_id || '').trim();
+    if (!sid) return;
+    compPerStudent[sid] = (compPerStudent[sid] || 0) + (Number(t.points) || 0);
+  });
+
+  const compStudentRanking = students
+    .map(s => ({ ...s, compPoints: compPerStudent[String(s.id || '').trim()] || 0 }))
+    .filter(s => s.compPoints > 0)
+    .sort((a, b) => b.compPoints - a.compPoints)
+    .map((s, i) => ({ ...s, rank: i + 1 }));
+
+  const codeToPaathshalaName = Object.fromEntries(
+    paathshalas.map(p => [String(p.paathshala_code), p.paathshala_name])
+  );
+  const compPerPaathshala = {};
+  students.forEach(s => {
+    const pts = compPerStudent[String(s.id || '').trim()] || 0;
+    if (!pts) return;
+    const code = String(s.paathshala_code || '').trim();
+    const key = code || (s.pathshala ? `name:${normalize(s.pathshala)}` : 'unknown');
+    if (!compPerPaathshala[key]) {
+      compPerPaathshala[key] = {
+        key,
+        name: codeToPaathshalaName[code] || s.pathshala || 'Unassigned',
+        code,
+        points: 0,
+        studentCount: 0,
+      };
+    }
+    compPerPaathshala[key].points += pts;
+    compPerPaathshala[key].studentCount += 1;
+  });
+  const compPaathshalaRanking = Object.values(compPerPaathshala)
+    .sort((a, b) => b.points - a.points)
+    .map((p, i) => ({ ...p, rank: i + 1 }));
+
+  const compTotalPoints = Object.values(compPerStudent).reduce((s, v) => s + v, 0);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const safeName = (s) => String(s || '').replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '').toLowerCase();
+
+  // Build { title, filename, headers, rows } for the currently active tab/view
+  const getExportData = () => {
+    if (activeTab === 'paathshala') {
+      return {
+        title: 'Paathshala Rankings',
+        filename: `leaderboard_paathshala_${today}`,
+        headers: ['Rank', 'Paathshala', 'Teacher', 'Students', 'Total Points'],
+        rows: pathshalaRankings.map((p, i) => [
+          i + 1, p.paathshala_name, p.teacher1_name || '', p.studentCount, p.totalPoints,
+        ]),
+      };
+    }
+    if (activeTab === 'competition') {
+      if (compView === 'paathshala') {
+        return {
+          title: `Competition – ${activeComp} (By Paathshala)`,
+          filename: `competition_${safeName(activeComp)}_paathshala_${today}`,
+          headers: ['Rank', 'Paathshala', 'Participants', 'Total Points'],
+          rows: compPaathshalaRanking.map((p, i) => [i + 1, p.name, p.studentCount, p.points]),
+        };
+      }
+      return {
+        title: `Competition – ${activeComp} (By Student)`,
+        filename: `competition_${safeName(activeComp)}_students_${today}`,
+        headers: ['Rank', 'Name', 'Roll', 'Batch', 'Paathshala', 'Points'],
+        rows: compStudentRanking.map(s => [
+          s.rank, s.name, s.roll_no || '', normalizeAgeGroup(s.batch) || '',
+          s.pathshala || codeToPaathshalaName[String(s.paathshala_code)] || '', s.compPoints,
+        ]),
+      };
+    }
+    // Students tab (respects current filters/search)
+    return {
+      title: 'Student Rankings',
+      filename: `leaderboard_students_${today}`,
+      headers: ['Rank', 'Name', 'Roll', 'Class', 'Batch', 'Room', 'Group', 'Gender', 'Age', 'Total Points', 'Category'],
+      rows: filtered.map(s => [
+        s.rank, s.name, s.roll_no || '', s.class || '', normalizeAgeGroup(s.batch) || '',
+        s.room_no || '', s.group || '', normalizeGender(s.gender) || '', s.age || '',
+        s.total_points, s.category,
+      ]),
+    };
+  };
+
+  const handleExportCSV = () => {
+    const { filename, headers, rows } = getExportData();
+    downloadCSV(`${filename}.csv`, buildCSVContent(headers, rows));
+  };
+
+  const handleExportPDF = () => {
+    const { title, headers, rows } = getExportData();
+    exportPDF(title, headers, rows);
+  };
+
   return (
     <div className="p-3 sm:p-6">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <div>
           <h1 className="text-xl font-bold text-gray-900">🏆 Leaderboard</h1>
           <p className="text-xs text-gray-500 mt-0.5">{leaderboard.length} students · points from transactions</p>
         </div>
-        {activeTab === 'students' && filtered.length !== leaderboard.length && (
-          <span className="text-sm text-saffron-700 font-semibold bg-saffron-50 border border-saffron-200 px-3 py-1 rounded-full">
-            {filtered.length} shown
-          </span>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {activeTab === 'students' && filtered.length !== leaderboard.length && (
+            <span className="text-sm text-saffron-700 font-semibold bg-saffron-50 border border-saffron-200 px-3 py-1 rounded-full">
+              {filtered.length} shown
+            </span>
+          )}
+          <button
+            onClick={handleExportCSV}
+            className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 text-xs sm:text-sm font-semibold hover:bg-gray-50"
+          >
+            📄 Export CSV
+          </button>
+          <button
+            onClick={handleExportPDF}
+            className="px-3 py-1.5 rounded-lg bg-forest-700 text-white text-xs sm:text-sm font-semibold hover:bg-forest-800"
+          >
+            🧾 Export PDF
+          </button>
+        </div>
       </div>
 
       {/* Tab switcher */}
-      <div className="flex gap-1 mb-4 bg-slate-100 rounded-xl p-1 w-fit">
+      <div className="flex gap-1 mb-4 bg-slate-100 rounded-xl p-1 w-full sm:w-fit overflow-x-auto no-scrollbar">
         <button
           onClick={() => setActiveTab('students')}
-          className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'students' ? 'bg-white text-forest-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          className={`flex-1 sm:flex-none whitespace-nowrap px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-colors ${activeTab === 'students' ? 'bg-white text-forest-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
         >
-          👤 Student Rankings
+          👤 Students
         </button>
         <button
           onClick={() => setActiveTab('paathshala')}
-          className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${activeTab === 'paathshala' ? 'bg-white text-forest-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          className={`flex-1 sm:flex-none whitespace-nowrap px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-colors ${activeTab === 'paathshala' ? 'bg-white text-forest-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
         >
-          🏫 Paathshala Rankings
+          🏫 Paathshala
+        </button>
+        <button
+          onClick={() => setActiveTab('competition')}
+          className={`flex-1 sm:flex-none whitespace-nowrap px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-colors ${activeTab === 'competition' ? 'bg-white text-forest-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          🏅 Competition
         </button>
       </div>
 
@@ -653,47 +851,209 @@ export default function AdminLeaderboard() {
                 </div>
               )}
 
-              {/* Full ranked list */}
-              <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-forest-700 text-white">
-                    <tr>
-                      <th className="px-4 py-3 text-center w-16">Rank</th>
-                      <th className="px-4 py-3 text-left">Paathshala</th>
-                      <th className="px-4 py-3 text-left hidden sm:table-cell">Teacher</th>
-                      <th className="px-4 py-3 text-center">Students</th>
-                      <th className="px-4 py-3 text-right">Total Points</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pathshalaRankings.map((p, idx) => (
-                      <tr key={p.id} className={`border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} ${idx < 3 ? 'font-semibold' : ''}`}>
-                        <td className="px-4 py-3 text-center">
+              {/* Mobile cards */}
+              <div className="md:hidden space-y-2.5">
+                {pathshalaRankings.map((p, idx) => (
+                  <div key={p.id} className="bg-white rounded-2xl border border-gray-200 p-3 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        <div className="text-lg leading-none flex-shrink-0 mt-0.5">
                           {RANK_MEDALS[idx + 1] || <span className="text-gray-500 font-mono text-sm">#{idx + 1}</span>}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="font-semibold text-gray-900">{p.paathshala_name}</div>
-                          {p.address && <div className="text-xs text-gray-500 truncate max-w-[200px]">{p.address}</div>}
-                        </td>
-                        <td className="px-4 py-3 text-gray-600 hidden sm:table-cell">{p.teacher1_name || '—'}</td>
-                        <td className="px-4 py-3 text-center">
-                          <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs font-semibold">{p.studentCount}</span>
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <span className="font-bold text-saffron-600 text-base">{p.totalPoints}</span>
-                        </td>
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-gray-900 leading-snug">{p.paathshala_name}</div>
+                          {p.teacher1_name && <div className="text-xs text-gray-500 mt-0.5 truncate">👩‍🏫 {p.teacher1_name}</div>}
+                          <span className="inline-block mt-1.5 bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-[11px] font-semibold">{p.studentCount} students</span>
+                        </div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="text-[11px] text-gray-500">Points</div>
+                        <div className="font-bold text-saffron-600 text-lg leading-tight">{p.totalPoints}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop table */}
+              <div className="hidden md:block bg-white rounded-2xl border border-gray-200 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-forest-700 text-white">
+                      <tr>
+                        <th className="px-4 py-3 text-center w-16">Rank</th>
+                        <th className="px-4 py-3 text-left">Paathshala</th>
+                        <th className="px-4 py-3 text-left hidden sm:table-cell">Teacher</th>
+                        <th className="px-4 py-3 text-center">Students</th>
+                        <th className="px-4 py-3 text-right">Total Points</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {pathshalaRankings.map((p, idx) => (
+                        <tr key={p.id} className={`border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} ${idx < 3 ? 'font-semibold' : ''}`}>
+                          <td className="px-4 py-3 text-center">
+                            {RANK_MEDALS[idx + 1] || <span className="text-gray-500 font-mono text-sm">#{idx + 1}</span>}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="font-semibold text-gray-900">{p.paathshala_name}</div>
+                            {p.address && <div className="text-xs text-gray-500 truncate max-w-[200px]">{p.address}</div>}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600 hidden sm:table-cell">{p.teacher1_name || '—'}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs font-semibold">{p.studentCount}</span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="font-bold text-saffron-600 text-base">{p.totalPoints}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </>
           )}
         </div>
       )}
 
+      {/* Competition Leaderboard Tab */}
+      {activeTab === 'competition' && (
+        <div className="space-y-4">
+          {competitionNames.length === 0 ? (
+            <div className="text-center py-16 text-gray-400 bg-white rounded-2xl border border-gray-200">
+              <div className="text-4xl mb-2">🏅</div>
+              <div className="text-sm">No competitions found yet.</div>
+              <div className="text-xs mt-1">Add a <strong>Competition</strong> event in Operations, or award competition points to students.</div>
+            </div>
+          ) : (
+            <>
+              {/* Competition picker + view toggle */}
+              <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+                <div className="w-full sm:w-72">
+                  <label className="text-xs font-semibold text-gray-600 block mb-1">Competition</label>
+                  <Select
+                    size="sm"
+                    value={activeComp}
+                    onChange={setSelectedComp}
+                    options={competitionNames}
+                  />
+                </div>
+                <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-full sm:w-auto">
+                  <button
+                    onClick={() => setCompView('students')}
+                    className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${compView === 'students' ? 'bg-white text-forest-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    👤 By Student
+                  </button>
+                  <button
+                    onClick={() => setCompView('paathshala')}
+                    className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${compView === 'paathshala' ? 'bg-white text-forest-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    🏫 By Paathshala
+                  </button>
+                </div>
+              </div>
+
+              {/* Summary strip */}
+              <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                <div className="rounded-2xl bg-saffron-50 border border-saffron-200 px-3 py-2.5">
+                  <div className="text-[10px] sm:text-[11px] text-saffron-600 font-semibold uppercase tracking-wide leading-tight">Participants</div>
+                  <div className="text-lg sm:text-xl font-bold text-saffron-700">{compStudentRanking.length}</div>
+                </div>
+                <div className="rounded-2xl bg-forest-50 border border-forest-200 px-3 py-2.5">
+                  <div className="text-[10px] sm:text-[11px] text-forest-600 font-semibold uppercase tracking-wide leading-tight">Points Awarded</div>
+                  <div className="text-lg sm:text-xl font-bold text-forest-700">{compTotalPoints}</div>
+                </div>
+                <div className="rounded-2xl bg-blue-50 border border-blue-200 px-3 py-2.5">
+                  <div className="text-[10px] sm:text-[11px] text-blue-600 font-semibold uppercase tracking-wide leading-tight">Paathshalas</div>
+                  <div className="text-lg sm:text-xl font-bold text-blue-700">{compPaathshalaRanking.length}</div>
+                </div>
+              </div>
+
+              {/* By Student */}
+              {compView === 'students' && (
+                <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-forest-700 text-white">
+                        <tr>
+                          <th className="px-4 py-3 text-center w-16">Rank</th>
+                          <th className="px-4 py-3 text-left">Name</th>
+                          <th className="px-4 py-3 text-left hidden sm:table-cell">Roll</th>
+                          <th className="px-4 py-3 text-left">Batch</th>
+                          <th className="px-4 py-3 text-left hidden md:table-cell">Paathshala</th>
+                          <th className="px-4 py-3 text-right">Points</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {compStudentRanking.map((s, i) => (
+                          <tr
+                            key={s.id}
+                            onClick={() => setSelectedStudent(s)}
+                            className={`border-b last:border-0 cursor-pointer hover:bg-saffron-50 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'} ${s.rank <= 3 ? 'font-semibold' : ''}`}
+                          >
+                            <td className="px-4 py-3 text-center">
+                              {RANK_MEDALS[s.rank] || <span className="text-gray-500 font-mono">#{s.rank}</span>}
+                            </td>
+                            <td className="px-4 py-3 font-semibold text-gray-900">{s.name}</td>
+                            <td className="px-4 py-3 text-gray-500 font-mono text-xs hidden sm:table-cell">{s.roll_no || '—'}</td>
+                            <td className="px-4 py-3">
+                              <span className="bg-forest-100 text-forest-700 px-2 py-0.5 rounded-full text-xs font-semibold">{normalizeAgeGroup(s.batch) || '—'}</span>
+                            </td>
+                            <td className="px-4 py-3 text-gray-600 hidden md:table-cell">{s.pathshala || codeToPaathshalaName[String(s.paathshala_code)] || '—'}</td>
+                            <td className="px-4 py-3 text-right font-bold text-saffron-600 text-base">+{s.compPoints}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {compStudentRanking.length === 0 && (
+                    <div className="text-center py-12 text-gray-400">No points awarded for this competition yet.</div>
+                  )}
+                </div>
+              )}
+
+              {/* By Paathshala */}
+              {compView === 'paathshala' && (
+                <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+                  <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-forest-700 text-white">
+                      <tr>
+                        <th className="px-4 py-3 text-center w-16">Rank</th>
+                        <th className="px-4 py-3 text-left">Paathshala</th>
+                        <th className="px-4 py-3 text-center whitespace-nowrap">Participants</th>
+                        <th className="px-4 py-3 text-right whitespace-nowrap">Total Points</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {compPaathshalaRanking.map((p, idx) => (
+                        <tr key={p.key} className={`border-b last:border-0 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} ${idx < 3 ? 'font-semibold' : ''}`}>
+                          <td className="px-4 py-3 text-center">
+                            {RANK_MEDALS[idx + 1] || <span className="text-gray-500 font-mono text-sm">#{idx + 1}</span>}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-gray-900">{p.name}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs font-semibold">{p.studentCount}</span>
+                          </td>
+                          <td className="px-4 py-3 text-right font-bold text-saffron-600 text-base">+{p.points}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  </div>
+                  {compPaathshalaRanking.length === 0 && (
+                    <div className="text-center py-12 text-gray-400">No points awarded for this competition yet.</div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       {/* Student Rankings Tab */}
-      {activeTab !== 'paathshala' && <>
+      {activeTab === 'students' && <>
       {/* Search */}
       <div className="relative mb-3">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>

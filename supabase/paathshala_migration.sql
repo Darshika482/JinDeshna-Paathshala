@@ -38,3 +38,11 @@ alter table students add column if not exists paathshala_code text;
 
 -- Index for fast lookups of students by paathshala
 create index if not exists idx_students_paathshala_code on students(paathshala_code);
+
+-- ─── ALTER VOLUNTEERS ─────────────────────────────────────────────────────────
+-- Paathshala teachers are auto-added as teacher-only volunteers. These columns
+-- let us show their Paathshala name and link them to their students. The fields
+-- are optional (event mentors have no Paathshala).
+alter table volunteers add column if not exists paathshala       text;
+alter table volunteers add column if not exists paathshala_code  text;
+create index if not exists idx_volunteers_paathshala_code on volunteers(paathshala_code);

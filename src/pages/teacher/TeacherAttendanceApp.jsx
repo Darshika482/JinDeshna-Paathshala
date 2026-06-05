@@ -1,12 +1,16 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
+import { supabase } from '../../lib/supabase.js';
 import { useAuthStore } from '../../store/useAuthStore.js';
 import { useStudentStore } from '../../store/useStudentStore.js';
 import { useAttendanceStore } from '../../store/useAttendanceStore.js';
 import { useTransactionStore } from '../../store/useTransactionStore.js';
+import { usePathshalaStore } from '../../store/usePathshalaStore.js';
 import LanguageToggle from '../../components/common/LanguageToggle.jsx';
 import OfflineBanner from '../../components/common/OfflineBanner.jsx';
+
+const onlyDigits = (v) => String(v || '').replace(/\D/g, '');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -663,11 +667,333 @@ function MyInfoTab({ currentUser }) {
   );
 }
 
+// ─── Paathshala Attendance Tab ─────────────────────────────────────────────────
+// Teachers take attendance for the students of THEIR Paathshala (matched by
+// mobile against the Paathshala's teacher1/teacher2 mobile). The "sessions" are
+// the active events marked as event_type === 'class' in Operations → Events.
+// No points are awarded for Paathshala attendance.
+
+function pathKey(p) {
+  return String(p?.paathshala_code || p?.id || '').trim();
+}
+
+function PaathshalaAttendanceTab({ currentUser, currentDay }) {
+  const store = useAttendanceStore();
+  const { paathshalas, students: pathStudents, fetchPathashalas, loading } = usePathshalaStore();
+
+  const [classEvents, setClassEvents] = useState([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [selectedKey, setSelectedKey] = useState(null);
+  const [showAllPaathshalas, setShowAllPaathshalas] = useState(false);
+  const [pathQuery, setPathQuery] = useState('');
+  const [activeSession, setActiveSession] = useState(0);
+  const [search, setSearch] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => { fetchPathashalas(); }, []);
+  useEffect(() => {
+    let alive = true;
+    supabase
+      .from('events')
+      .select('id,name,time_slot,event_type,sort_order')
+      .eq('is_active', true)
+      .eq('event_type', 'class')
+      .order('sort_order')
+      .order('name')
+      .then(({ data }) => {
+        if (!alive) return;
+        setClassEvents(data || []);
+        setEventsLoading(false);
+      });
+    return () => { alive = false; };
+  }, []);
+
+  const myMobile = onlyDigits(currentUser?.mobile);
+  const matchedPaathshalas = paathshalas.filter((p) => {
+    if (!myMobile) return false;
+    return onlyDigits(p.teacher1_mobile) === myMobile || onlyDigits(p.teacher2_mobile) === myMobile;
+  });
+
+  // Default selection: first matched Paathshala.
+  useEffect(() => {
+    if (selectedKey) return;
+    if (matchedPaathshalas.length > 0) setSelectedKey(pathKey(matchedPaathshalas[0]));
+  }, [matchedPaathshalas, selectedKey]);
+
+  const selectedPath = paathshalas.find((p) => pathKey(p) === selectedKey) || null;
+  const myStudents = selectedPath
+    ? pathStudents
+        .filter((s) => String(s.paathshala_code || '').trim() === String(selectedPath.paathshala_code || '').trim())
+        .sort((a, b) => String(a.roll_no).localeCompare(String(b.roll_no), undefined, { numeric: true }))
+    : [];
+
+  const hasSessions = classEvents.length > 0;
+  const activeEvent = classEvents[activeSession] || null;
+  const sessionNum = activeSession + 1;
+  // class_code isolates each (paathshala, class-event) pair so sessions and
+  // Paathshalas never collide in the shared attendance table.
+  const classCode = selectedPath && activeEvent
+    ? `P${selectedPath.paathshala_code}::${activeEvent.id}`
+    : '';
+
+  const submission = classCode ? store.getSubmission(sessionNum, classCode) : null;
+  const editable = classCode ? store.canEdit(sessionNum, classCode) : true;
+  const isLocked = !!submission && !editable;
+  const stats = classCode ? store.getStats(sessionNum, classCode, myStudents) : { present: 0, absent: 0, late: 0, excused: 0, total: 0 };
+
+  const filtered = (() => {
+    const q = search.toLowerCase().trim();
+    if (!q) return myStudents;
+    return myStudents.filter((s) =>
+      String(s.name || '').toLowerCase().includes(q) ||
+      String(s.roll_no || '').toLowerCase().includes(q) ||
+      (s.group && String(s.group).toLowerCase().includes(q))
+    );
+  })();
+
+  const handleStatusChange = useCallback((studentId, studentName, status) => {
+    if (!classCode) { toast.error('Select a Paathshala and session first.'); return; }
+    const ok = store.setStatus(
+      studentId, studentName, sessionNum, classCode, status,
+      currentUser?.id, currentUser?.name, currentDay
+    );
+    if (!ok) toast.error('Grace period ended. Attendance is locked.');
+  }, [store, classCode, sessionNum, currentUser, currentDay]);
+
+  const handleSubmit = async () => {
+    if (!classCode) { toast.error('Select a Paathshala and session first.'); return; }
+    if (isLocked) { toast.error('Attendance is locked after the 30-minute grace period.'); return; }
+    setSubmitting(true);
+    try {
+      // No points awarded for Paathshala attendance — just record the submission.
+      const { wasAlreadySubmitted } = await store.submitClass(
+        sessionNum, classCode, currentUser?.id, currentUser?.name
+      );
+      toast.success(
+        wasAlreadySubmitted
+          ? 'Attendance re-submitted.'
+          : `Attendance submitted for ${stats.present}/${stats.total} present.`,
+        { duration: 3500 }
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const pq = pathQuery.trim().toLowerCase();
+  const allFiltered = pq
+    ? paathshalas.filter((p) =>
+        String(p.paathshala_name || '').toLowerCase().includes(pq) ||
+        String(p.paathshala_code || '').toLowerCase().includes(pq))
+    : paathshalas;
+
+  return (
+    <div className="flex-1 overflow-y-auto p-4 pb-28 max-w-3xl mx-auto w-full space-y-4">
+      {/* Paathshala selector */}
+      <div className="card p-4">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="text-sm font-bold text-gray-800">🏫 My Paathshala</div>
+          {matchedPaathshalas.length > 0 && (
+            <button
+              onClick={() => setShowAllPaathshalas((v) => !v)}
+              className="text-xs font-semibold text-forest-700 hover:text-forest-800"
+            >
+              {showAllPaathshalas ? 'Hide list' : 'Choose another'}
+            </button>
+          )}
+        </div>
+
+        {matchedPaathshalas.length === 0 && !loading && (
+          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">
+            We couldn't match your mobile{myMobile ? ` (${myMobile})` : ''} to a Paathshala. Pick yours below.
+          </div>
+        )}
+
+        {/* Matched chips */}
+        {matchedPaathshalas.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {matchedPaathshalas.map((p) => (
+              <button
+                key={pathKey(p)}
+                onClick={() => setSelectedKey(pathKey(p))}
+                className={`px-3 py-1.5 rounded-full text-sm font-semibold border-2 transition-all ${
+                  selectedKey === pathKey(p)
+                    ? 'bg-saffron-500 text-white border-saffron-500'
+                    : 'border-gray-200 text-gray-700 hover:border-gray-300 bg-white'
+                }`}
+              >
+                {p.paathshala_name} ({p.paathshala_code})
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Full searchable list */}
+        {(showAllPaathshalas || matchedPaathshalas.length === 0) && (
+          <div className="mt-2">
+            <div className="relative mb-2">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔎</span>
+              <input
+                className="w-full border border-gray-200 rounded-xl pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-saffron-500"
+                placeholder="Search Paathshala name…"
+                value={pathQuery}
+                onChange={(e) => setPathQuery(e.target.value)}
+              />
+            </div>
+            <div className="max-h-44 overflow-y-auto border border-gray-100 rounded-xl divide-y divide-gray-50">
+              {allFiltered.map((p) => (
+                <button
+                  key={pathKey(p)}
+                  onClick={() => { setSelectedKey(pathKey(p)); setShowAllPaathshalas(false); }}
+                  className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${selectedKey === pathKey(p) ? 'bg-saffron-50 font-semibold text-saffron-800' : 'text-gray-700'}`}
+                >
+                  {p.paathshala_name} <span className="text-gray-400">({p.paathshala_code})</span>
+                </button>
+              ))}
+              {allFiltered.length === 0 && (
+                <div className="px-3 py-2 text-xs text-gray-400">No Paathshala found.</div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {(loading || eventsLoading) && (
+        <div className="text-center text-gray-400 py-8">
+          <div className="text-3xl mb-2">⏳</div>
+          <div className="text-sm">Loading…</div>
+        </div>
+      )}
+
+      {!eventsLoading && !hasSessions && (
+        <div className="text-center bg-white border border-gray-200 rounded-2xl p-6">
+          <div className="text-3xl mb-2">📚</div>
+          <div className="font-semibold text-gray-800">No class sessions found</div>
+          <div className="text-sm text-gray-500 mt-1">
+            Ask admin to add events of type <span className="font-semibold">Class</span> in Operations → Events.
+          </div>
+        </div>
+      )}
+
+      {!loading && !eventsLoading && hasSessions && selectedPath && (
+        <>
+          {/* Session tabs (one per class-event) */}
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {classEvents.map((ev, i) => {
+              const code = `P${selectedPath.paathshala_code}::${ev.id}`;
+              const sub = store.getSubmission(i + 1, code);
+              return (
+                <button
+                  key={ev.id}
+                  onClick={() => setActiveSession(i)}
+                  className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-semibold border-2 transition-all ${
+                    activeSession === i
+                      ? 'bg-forest-700 text-white border-forest-700'
+                      : 'border-gray-200 text-gray-600 hover:border-gray-300 bg-white'
+                  }`}
+                >
+                  {ev.name}{ev.time_slot ? ` · ${ev.time_slot}` : ''}{sub ? ' ✓' : ''}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Attendance card */}
+          <div className="card p-0 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-bold text-gray-800 text-sm">
+                  {selectedPath.paathshala_name}
+                  <span className="text-gray-400 font-normal"> · {activeEvent?.name}</span>
+                </div>
+                {isLocked && <span className="text-xs font-semibold text-gray-400">🔒 Locked</span>}
+              </div>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                <span className="text-xs font-semibold px-2 py-1 rounded-full bg-green-100 text-green-700">✅ {stats.present}</span>
+                <span className="text-xs font-semibold px-2 py-1 rounded-full bg-red-100 text-red-700">❌ {stats.absent}</span>
+                {stats.late > 0 && <span className="text-xs font-semibold px-2 py-1 rounded-full bg-amber-100 text-amber-700">⏰ {stats.late}</span>}
+                {stats.excused > 0 && <span className="text-xs font-semibold px-2 py-1 rounded-full bg-blue-100 text-blue-700">📋 {stats.excused}</span>}
+                <span className="text-xs font-semibold px-2 py-1 rounded-full bg-gray-100 text-gray-500">/ {stats.total}</span>
+              </div>
+            </div>
+
+            {/* Search */}
+            <div className="px-3 pt-2.5 pb-2">
+              <div className="relative">
+                <input
+                  className="w-full border-2 border-gray-200 rounded-xl px-3 py-2 pr-8 text-sm focus:outline-none focus:border-saffron-500"
+                  placeholder="Search name, roll no, or group…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+                {search ? (
+                  <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm">✕</button>
+                ) : (
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">🔍</span>
+                )}
+              </div>
+            </div>
+
+            {/* Student list */}
+            <div className="px-3 space-y-1.5 pb-3 max-h-[55vh] overflow-y-auto">
+              {filtered.length === 0 ? (
+                <div className="text-center py-10 text-gray-400 text-sm">
+                  {search ? 'No students match your search.' : 'No students in this Paathshala yet.'}
+                </div>
+              ) : (
+                filtered.map((student) => (
+                  <StudentRow
+                    key={student.id}
+                    student={student}
+                    classNum={sessionNum}
+                    classCode={classCode}
+                    onStatusChange={handleStatusChange}
+                    isLocked={isLocked}
+                  />
+                ))
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-3 border-t border-gray-100">
+              {submission ? (
+                <div className={`rounded-xl p-3 text-center ${editable ? 'bg-green-50 border border-green-200' : 'bg-gray-100 border border-gray-200'}`}>
+                  <div className="text-sm font-bold text-green-700">✓ Attendance submitted</div>
+                  <div className="text-xs text-gray-500 mt-0.5">at {format(new Date(submission.submittedAt), 'h:mm a')}</div>
+                  {editable && (
+                    <button
+                      onClick={handleSubmit}
+                      disabled={submitting}
+                      className="mt-2 text-xs font-semibold text-forest-700 border border-forest-300 rounded-lg px-3 py-1.5 hover:bg-forest-50 active:scale-95 transition-all disabled:opacity-50"
+                    >
+                      {submitting ? 'Updating…' : 'Re-submit'}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={handleSubmit}
+                  disabled={submitting || myStudents.length === 0}
+                  className="btn-primary w-full py-3 text-base disabled:opacity-60"
+                >
+                  {submitting ? 'Submitting…' : 'Submit Attendance'}
+                </button>
+              )}
+              <div className="text-[11px] text-gray-400 text-center mt-2">No points are awarded for Paathshala attendance.</div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 const TABS = [
-  { key: 'attendance', label: 'Attendance', emoji: '📋' },
-  { key: 'myinfo',     label: 'My Info',    emoji: '👤' },
+  { key: 'attendance', label: 'Class Attendance', emoji: '📋' },
+  { key: 'paathshala', label: 'Paathshala',       emoji: '🏫' },
+  { key: 'myinfo',     label: 'My Info',          emoji: '👤' },
 ];
 
 export default function TeacherAttendanceApp() {
@@ -768,6 +1094,12 @@ export default function TeacherAttendanceApp() {
             currentUser={currentUser}
             currentDay={currentDay}
             hasAnyAssignment={hasAnyAssignment}
+          />
+        )}
+        {activeTab === 'paathshala' && (
+          <PaathshalaAttendanceTab
+            currentUser={currentUser}
+            currentDay={currentDay}
           />
         )}
         {activeTab === 'myinfo' && (
