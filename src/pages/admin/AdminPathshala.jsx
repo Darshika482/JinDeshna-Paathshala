@@ -59,6 +59,48 @@ function triggerDownload(filename, content, type = 'text/csv;charset=utf-8;') {
   document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"]/g, (char) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[char]
+  ));
+}
+
+function exportTableAsPDF(title, headers, rows) {
+  const win = window.open('', '_blank');
+  if (!win) return;
+  const thead = headers.map((h, i) => `<th class="${i === headers.length - 1 ? 'num' : ''}">${escapeHtml(h)}</th>`).join('');
+  const tbody = rows.map((r) => `<tr>${
+    r.map((c, i) => `<td class="${i === headers.length - 1 ? 'num' : ''}">${escapeHtml(c)}</td>`).join('')
+  }</tr>`).join('');
+
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+    <style>
+      *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+      body{font-family:'Segoe UI',Arial,sans-serif;color:#1f2937;margin:24px;}
+      h1{font-size:18px;margin:0 0 2px;color:#14532d;}
+      .meta{font-size:11px;color:#6b7280;margin-bottom:14px;}
+      .bar{margin-bottom:14px;}
+      .bar button{font:inherit;padding:8px 16px;border:0;border-radius:8px;background:#ea7c1f;color:#fff;font-weight:600;cursor:pointer;}
+      table{width:100%;border-collapse:collapse;font-size:11px;}
+      th{background:#14532d;color:#fff;text-align:left;padding:7px 9px;}
+      td{padding:6px 9px;border-bottom:1px solid #e5e7eb;}
+      tr:nth-child(even) td{background:#f9fafb;}
+      .num{text-align:right;}
+      th.num{text-align:right;}
+      @media print{button{display:none;}}
+    </style></head><body>
+    <div class="bar"><button onclick="window.print()">Print / Save as PDF</button></div>
+    <h1>${escapeHtml(title)}</h1>
+    <div class="meta">Generated ${new Date().toLocaleString('en-IN')} · ${rows.length} rows</div>
+    <table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>
+    </body></html>`);
+  win.document.close();
+  win.focus();
+  setTimeout(() => {
+    try { win.print(); } catch { /* user can still click print button */ }
+  }, 350);
+}
+
 // ─── Custom Select ─────────────────────────────────────────────────────────────
 // Renders the dropdown list via a React portal so it is never clipped by
 // overflow-hidden / overflow-auto ancestor containers inside modals.
@@ -946,7 +988,8 @@ function DeletePathshalaModal({ pathshala, studentCount, deleting, onConfirmDele
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function AdminPathshala() {
-  const { paathshalas, students, loading, fetchPathashalas, addPathshala, updatePathshala, deletePathshala, addStudentToPathshala, updateStudent, deleteStudent } = usePathshalaStore();
+  const { paathshalas, students, loading, fetchPathashalas, addPathshala, updatePathshala, deletePathshala, addStudentToPathshala, updateStudent, deleteStudent, syncAllPaathshalaTeachers } = usePathshalaStore();
+  const [syncingTeachers, setSyncingTeachers] = useState(false);
   const [openCode, setOpenCode]         = useState(null);
   const [showForm, setShowForm]         = useState(false);
   const [editTarget, setEditTarget]     = useState(null);
@@ -960,50 +1003,75 @@ export default function AdminPathshala() {
 
   useEffect(() => { fetchPathashalas(); }, []);
 
-  // ── Paathshala CSV download ───────────────────────────────────────────────
-  const downloadOverviewCSV = () => {
-    const rows = paathshalas.map(p => {
-      const count = students.filter(s => s.paathshala_code === p.paathshala_code).length;
-      return [
-        p.paathshala_code, p.paathshala_name, p.address || '',
-        p.teacher1_name || '', p.teacher1_mobile || '',
-        p.teacher2_name || '', p.teacher2_mobile || '',
-        p.mandal_president_name || '', p.mandal_president_mobile || '',
-        p.pathshala_type || '',
-        (p.classes_conducted || []).join(', '),
-        count,
-      ];
-    });
-    const csv = buildCSV([
-      'Code','Pathshala Name','Address',
-      'Teacher 1','Teacher 1 Mobile','Teacher 2','Teacher 2 Mobile',
-      'Mandal President','President Mobile',
-      'Type','Classes Conducted','Student Count',
-    ], rows);
-    triggerDownload('paathshalas-overview.csv', csv);
-  };
+  const getOverviewRows = () => paathshalas.map((p) => {
+    const count = students.filter((s) => s.paathshala_code === p.paathshala_code).length;
+    return [
+      p.paathshala_code, p.paathshala_name, p.address || '',
+      p.teacher1_name || '', p.teacher1_mobile || '',
+      p.teacher2_name || '', p.teacher2_mobile || '',
+      p.mandal_president_name || '', p.mandal_president_mobile || '',
+      p.pathshala_type || '',
+      (p.classes_conducted || []).join(', '),
+      count,
+    ];
+  });
 
-  const downloadFullRosterCSV = () => {
+  const getFullRosterRows = () => {
     const rows = [];
     for (const p of paathshalas) {
-      const myStudents = students.filter(s => s.paathshala_code === p.paathshala_code);
+      const myStudents = students.filter((s) => s.paathshala_code === p.paathshala_code);
       if (myStudents.length === 0) {
-        rows.push([p.paathshala_code, p.paathshala_name, p.teacher1_name||'', '', '', '', '', '', '']);
+        rows.push([p.paathshala_code, p.paathshala_name, p.teacher1_name || '', '', '', '', '', '', '']);
       } else {
         for (const s of myStudents) {
           rows.push([
-            p.paathshala_code, p.paathshala_name, p.teacher1_name||'',
-            s.roll_no||'', s.name||'', s.parent_name||s.father_name||'',
-            s.mobile||'', s.gender||'', s.age||'',
+            p.paathshala_code, p.paathshala_name, p.teacher1_name || '',
+            s.roll_no || '', s.name || '', s.parent_name || s.father_name || '',
+            s.mobile || '', s.gender || '', s.age || '',
           ]);
         }
       }
     }
-    const csv = buildCSV([
+    return rows;
+  };
+
+  // ── Paathshala CSV download ───────────────────────────────────────────────
+  const downloadOverviewCSV = () => {
+    const headers = [
+      'Code','Pathshala Name','Address',
+      'Teacher 1','Teacher 1 Mobile','Teacher 2','Teacher 2 Mobile',
+      'Mandal President','President Mobile',
+      'Type','Classes Conducted','Student Count',
+    ];
+    const csv = buildCSV(headers, getOverviewRows());
+    triggerDownload('paathshalas-overview.csv', csv);
+  };
+
+  const downloadFullRosterCSV = () => {
+    const headers = [
       'Pathshala Code','Pathshala Name','Teacher',
       'Roll No','Student Name',"Father/Mother's Name",'Mobile','Gender','Age',
-    ], rows);
+    ];
+    const csv = buildCSV(headers, getFullRosterRows());
     triggerDownload('paathshalas-full-roster.csv', csv);
+  };
+
+  const downloadOverviewPDF = () => {
+    const headers = [
+      'Code','Pathshala Name','Address',
+      'Teacher 1','Teacher 1 Mobile','Teacher 2','Teacher 2 Mobile',
+      'Mandal President','President Mobile',
+      'Type','Classes Conducted','Student Count',
+    ];
+    exportTableAsPDF('Paathshala Overview', headers, getOverviewRows());
+  };
+
+  const downloadFullRosterPDF = () => {
+    const headers = [
+      'Pathshala Code','Pathshala Name','Teacher',
+      'Roll No','Student Name',"Father/Mother's Name",'Mobile','Gender','Age',
+    ];
+    exportTableAsPDF('Paathshala Full Roster', headers, getFullRosterRows());
   };
 
   const downloadPathshalaTemplate = () => {
@@ -1061,6 +1129,19 @@ export default function AdminPathshala() {
   const totalStudents   = students.length;
   const totalTeachers   = [...new Set(paathshalas.map(p => p.teacher1_name).filter(Boolean))].length;
   const totalPathashalas = paathshalas.length;
+
+  const handleSyncTeachers = async () => {
+    setSyncingTeachers(true);
+    const r = await syncAllPaathshalaTeachers();
+    setSyncingTeachers(false);
+    if (r.success) {
+      toast.success(r.added > 0
+        ? `${r.added} teacher${r.added !== 1 ? 's' : ''} added to Mentors`
+        : 'Teachers already up to date');
+    } else {
+      toast.error(r.error || 'Failed to sync teachers');
+    }
+  };
 
   const handleSave = async (form) => {
     if (editTarget) {
@@ -1161,6 +1242,18 @@ export default function AdminPathshala() {
           <button onClick={downloadFullRosterCSV}
             className="px-3 py-1.5 rounded-xl bg-saffron-600 text-white text-sm font-semibold hover:bg-saffron-700 active:scale-[0.98] transition-all flex items-center gap-1.5">
             ⬇ Full Roster CSV
+          </button>
+          <button onClick={downloadOverviewPDF}
+            className="px-3 py-1.5 rounded-xl bg-forest-800 text-white text-sm font-semibold hover:bg-forest-900 active:scale-[0.98] transition-all flex items-center gap-1.5">
+            🧾 Overview PDF
+          </button>
+          <button onClick={downloadFullRosterPDF}
+            className="px-3 py-1.5 rounded-xl bg-saffron-700 text-white text-sm font-semibold hover:bg-saffron-800 active:scale-[0.98] transition-all flex items-center gap-1.5">
+            🧾 Full Roster PDF
+          </button>
+          <button onClick={handleSyncTeachers} disabled={syncingTeachers}
+            className="px-3 py-1.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 active:scale-[0.98] transition-all flex items-center gap-1.5 disabled:opacity-50">
+            {syncingTeachers ? '⏳ Syncing…' : '👩‍🏫 Sync Teachers'}
           </button>
           <button onClick={() => { setEditTarget(null); setShowForm(true); }}
             className="px-3 py-1.5 rounded-xl bg-forest-700 text-white text-sm font-semibold hover:bg-forest-800 active:scale-[0.98] transition-all flex items-center gap-1.5">

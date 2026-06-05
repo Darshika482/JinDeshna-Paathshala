@@ -9,7 +9,7 @@ import { getTeacherNameForClass } from '../../lib/classTeachers.js';
 
 const CHECK_IN_PASSWORD = '123';
 const TABS = ['All', 'Pending', 'Checked In'];
-const GENDER_FILTERS = ['All', 'Boy', 'Girl'];
+const GENDER_FILTERS = ['All', 'Male', 'Female'];
 const CHECKIN_SESSION_KEY = 'shivir-checkin-session';
 
 function PasswordGate({ onUnlock, onBack }) {
@@ -104,17 +104,39 @@ function StudentProfileModal({ student, onClose, onCheckIn, onToggleKitGiven, la
             {isHindi && student.name_hi && student.name_hi !== student.name && (
               <div className="text-sm text-gray-400 mt-0.5">{student.name}</div>
             )}
-            <div className="text-sm text-gray-500 font-mono mt-0.5">{student.roll_no}</div>
+            <div className="mt-2 inline-flex items-center gap-2 bg-forest-700 text-white px-4 py-1.5 rounded-full shadow-sm">
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-forest-200">Roll No</span>
+              <span className="text-lg font-extrabold font-mono tracking-wider">{student.roll_no || '—'}</span>
+            </div>
           </div>
         </div>
 
         {/* Details */}
         <div className="px-6 py-4 space-y-3">
+          {/* Pathshala highlight */}
+          {(student.pathshala || student.paathshala || student.paathshala_code) && (
+            <div className="bg-saffron-50 border border-saffron-200 rounded-xl px-3 py-2.5 flex items-center gap-3">
+              <span className="text-xl">🏫</span>
+              <div className="min-w-0">
+                <div className="text-[10px] font-bold uppercase tracking-wide text-saffron-600">Paathshala</div>
+                <div className="text-sm font-bold text-saffron-800 truncate">
+                  {student.pathshala || student.paathshala || `Code ${student.paathshala_code}`}
+                  {(student.pathshala || student.paathshala) && student.paathshala_code ? ` (${student.paathshala_code})` : ''}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Badges row */}
           <div className="flex flex-wrap gap-2">
             {student.batch && (
               <span className="bg-forest-100 text-forest-700 px-3 py-1 rounded-full text-sm font-semibold">
                 📚 {student.batch}
+              </span>
+            )}
+            {student.group && (
+              <span className="bg-forest-100 text-forest-700 px-3 py-1 rounded-full text-sm font-semibold">
+                👥 {student.group}
               </span>
             )}
             {student.room_no && (
@@ -129,7 +151,7 @@ function StudentProfileModal({ student, onClose, onCheckIn, onToggleKitGiven, la
             )}
             {student.gender && (
               <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-sm font-semibold">
-                {student.gender === 'Boy' ? '👦' : '👧'} {student.gender}
+                {String(student.gender).toLowerCase() === 'male' ? '👦' : '👧'} {student.gender}
               </span>
             )}
             {student.age && (
@@ -191,6 +213,44 @@ function StudentProfileModal({ student, onClose, onCheckIn, onToggleKitGiven, la
                 </div>
               </div>
             )}
+            {student.whatsapp && student.whatsapp !== student.mobile && (
+              <div className="flex items-center gap-3">
+                <span className="text-lg w-6 text-center">💬</span>
+                <div>
+                  <div className="text-xs text-gray-400 font-medium">WhatsApp</div>
+                  <div className="text-sm font-semibold text-gray-800">{student.whatsapp}</div>
+                </div>
+              </div>
+            )}
+            {student.reg_id && (
+              <div className="flex items-center gap-3">
+                <span className="text-lg w-6 text-center">🆔</span>
+                <div>
+                  <div className="text-xs text-gray-400 font-medium">Reg ID</div>
+                  <div className="text-sm font-semibold text-gray-800 font-mono">{student.reg_id}</div>
+                </div>
+              </div>
+            )}
+            {(student.city || student.address) && (
+              <div className="flex items-center gap-3">
+                <span className="text-lg w-6 text-center">📍</span>
+                <div className="min-w-0">
+                  <div className="text-xs text-gray-400 font-medium">Address</div>
+                  <div className="text-sm font-semibold text-gray-800">
+                    {[student.address, student.city, student.pin_code].filter(Boolean).join(', ')}
+                  </div>
+                </div>
+              </div>
+            )}
+            {Number(student.total_points) > 0 && (
+              <div className="flex items-center gap-3">
+                <span className="text-lg w-6 text-center">⭐</span>
+                <div>
+                  <div className="text-xs text-gray-400 font-medium">Total Points</div>
+                  <div className="text-sm font-semibold text-gray-800">{student.total_points}</div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Kit Given */}
@@ -239,20 +299,71 @@ function CheckInApp({ onBack, onLogout }) {
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState('Pending');
   const [genderFilter, setGenderFilter] = useState('All');
+  const [selectedPathshala, setSelectedPathshala] = useState('ALL');
+  const [pathshalaQuery, setPathshalaQuery] = useState('');
   const [lastCheckedId, setLastCheckedId] = useState(null);
   const [profileStudent, setProfileStudent] = useState(null);
   const [pendingCheckIn, setPendingCheckIn] = useState(null);
+  const [pendingBulkCheckIn, setPendingBulkCheckIn] = useState(null);
+  const [bulkCheckingIn, setBulkCheckingIn] = useState(false);
   const inputRef = useRef(null);
 
-  const checkedCount = students.filter(s => s.checked_in).length;
-  const checkedInBoys = students.filter(s => s.checked_in && String(s.gender || '').toLowerCase() === 'boy').length;
-  const checkedInGirls = students.filter(s => s.checked_in && String(s.gender || '').toLowerCase() === 'girl').length;
-  const totalBoys = students.filter(s => String(s.gender || '').toLowerCase() === 'boy').length;
-  const totalGirls = students.filter(s => String(s.gender || '').toLowerCase() === 'girl').length;
-  const total = students.length;
+  const getPathshalaKey = (student) => {
+    const code = String(student.paathshala_code || '').trim();
+    if (code) return `CODE:${code}`;
+    const name = String(student.pathshala || student.paathshala || '').trim();
+    if (name) return `NAME:${name.toLowerCase()}`;
+    return 'NONE';
+  };
+  const getPathshalaLabel = (student) => {
+    const name = String(student.pathshala || student.paathshala || '').trim();
+    const code = String(student.paathshala_code || '').trim();
+    if (name && code) return `${name} (${code})`;
+    if (name) return name;
+    if (code) return `Pathshala ${code}`;
+    return 'Unassigned';
+  };
+
+  const pathshalaMap = new Map();
+  students.forEach((s) => {
+    const key = getPathshalaKey(s);
+    if (!pathshalaMap.has(key)) {
+      pathshalaMap.set(key, {
+        key,
+        label: getPathshalaLabel(s),
+        total: 0,
+        checked: 0,
+      });
+    }
+    const rec = pathshalaMap.get(key);
+    rec.total += 1;
+    if (s.checked_in) rec.checked += 1;
+  });
+  const pathshalaOptions = [...pathshalaMap.values()]
+    .map(opt => ({ ...opt, done: opt.total > 0 && opt.checked >= opt.total }))
+    .sort((a, b) => {
+      // Fully checked-in Paathshalas go to the end, rest stay alphabetical.
+      if (a.done !== b.done) return a.done ? 1 : -1;
+      return a.label.localeCompare(b.label);
+    });
+  const pq = pathshalaQuery.trim().toLowerCase();
+  const filteredPathshalaOptions = pq
+    ? pathshalaOptions.filter(opt => opt.label.toLowerCase().includes(pq))
+    : pathshalaOptions;
+
+  const scopedStudents = selectedPathshala === 'ALL'
+    ? students
+    : students.filter(s => getPathshalaKey(s) === selectedPathshala);
+
+  const checkedCount = scopedStudents.filter(s => s.checked_in).length;
+  const checkedInBoys = scopedStudents.filter(s => s.checked_in && String(s.gender || '').toLowerCase() === 'male').length;
+  const checkedInGirls = scopedStudents.filter(s => s.checked_in && String(s.gender || '').toLowerCase() === 'female').length;
+  const totalBoys = scopedStudents.filter(s => String(s.gender || '').toLowerCase() === 'male').length;
+  const totalGirls = scopedStudents.filter(s => String(s.gender || '').toLowerCase() === 'female').length;
+  const total = scopedStudents.length;
   const pct = total > 0 ? Math.round((checkedCount / total) * 100) : 0;
 
-  const baseList = students.filter(s => {
+  const baseList = scopedStudents.filter(s => {
     if (tab === 'Checked In' && !s.checked_in) return false;
     if (tab === 'Pending' && s.checked_in) return false;
     if (genderFilter !== 'All' && String(s.gender || '').toLowerCase() !== genderFilter.toLowerCase()) return false;
@@ -262,9 +373,12 @@ function CheckInApp({ onBack, onLogout }) {
   const q = query.trim().toLowerCase();
   const searchHits = q.length >= 2
     ? baseList.filter(s =>
-        s.name.toLowerCase().includes(q) ||
-        (s.mobile && s.mobile.includes(q)) ||
-        s.roll_no.toLowerCase().includes(q)
+        String(s.name || '').toLowerCase().includes(q) ||
+        String(s.name_hi || '').toLowerCase().includes(q) ||
+        (s.mobile && String(s.mobile).includes(q)) ||
+        String(s.roll_no || '').toLowerCase().includes(q) ||
+        String(s.pathshala || s.paathshala || '').toLowerCase().includes(q) ||
+        String(s.paathshala_code || '').toLowerCase().includes(q)
       )
     : [];
 
@@ -289,6 +403,34 @@ function CheckInApp({ onBack, onLogout }) {
     if (!pendingCheckIn) return;
     handleCheckIn(pendingCheckIn.id);
     setPendingCheckIn(null);
+  };
+
+  const requestBulkCheckIn = () => {
+    const pendingIds = scopedStudents.filter(s => !s.checked_in).map(s => s.id);
+    if (pendingIds.length === 0) {
+      toast('All students in this Paathshala are already checked in.');
+      return;
+    }
+    setPendingBulkCheckIn({
+      ids: pendingIds,
+      count: pendingIds.length,
+    });
+  };
+
+  const confirmBulkCheckIn = async () => {
+    if (!pendingBulkCheckIn) return;
+    setBulkCheckingIn(true);
+    try {
+      for (const id of pendingBulkCheckIn.ids) {
+        await checkIn(id);
+      }
+      toast.success(`${pendingBulkCheckIn.count} students checked in.`);
+      setLastCheckedId(pendingBulkCheckIn.ids[pendingBulkCheckIn.ids.length - 1] || null);
+      setTimeout(() => setLastCheckedId(null), 2000);
+    } finally {
+      setBulkCheckingIn(false);
+      setPendingBulkCheckIn(null);
+    }
   };
 
   const handleToggleKitGiven = async (student) => {
@@ -399,6 +541,73 @@ function CheckInApp({ onBack, onLogout }) {
       </div>
 
       <div className="p-4 space-y-4">
+        {/* Pathshala selector */}
+        <div className="bg-white border border-gray-200 rounded-2xl p-3 shadow-sm">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="text-sm font-semibold text-gray-800">Paathshala</div>
+            <div className="text-xs text-gray-500">
+              {selectedPathshala === 'ALL' ? `All students (${students.length})` : `${total} students`}
+            </div>
+          </div>
+          <div className="relative mb-2">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔎</span>
+            <input
+              className="w-full border border-gray-200 rounded-xl pl-9 pr-8 py-2 text-sm focus:outline-none focus:border-saffron-500"
+              placeholder="Search Paathshala name..."
+              value={pathshalaQuery}
+              onChange={(e) => setPathshalaQuery(e.target.value)}
+            />
+            {pathshalaQuery && (
+              <button
+                type="button"
+                onClick={() => setPathshalaQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            <button
+              onClick={() => setSelectedPathshala('ALL')}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-semibold border-2 transition-all ${
+                selectedPathshala === 'ALL'
+                  ? 'bg-forest-700 text-white border-forest-700'
+                  : 'border-gray-200 text-gray-600 hover:border-gray-300 bg-white'
+              }`}
+            >
+              All ({students.length})
+            </button>
+            {filteredPathshalaOptions.map((opt) => {
+              const isSelected = selectedPathshala === opt.key;
+              let chipClass;
+              if (isSelected) {
+                chipClass = opt.done
+                  ? 'bg-green-600 text-white border-green-600'
+                  : 'bg-saffron-500 text-white border-saffron-500';
+              } else if (opt.done) {
+                chipClass = 'bg-green-50 text-green-700 border-green-300 hover:border-green-400';
+              } else {
+                chipClass = 'border-gray-200 text-gray-700 hover:border-gray-300 bg-white';
+              }
+              return (
+                <button
+                  key={opt.key}
+                  onClick={() => setSelectedPathshala(opt.key)}
+                  className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-semibold border-2 transition-all ${chipClass}`}
+                >
+                  {opt.done ? '✓ ' : ''}{opt.label} ({opt.checked}/{opt.total})
+                </button>
+              );
+            })}
+            {filteredPathshalaOptions.length === 0 && (
+              <div className="text-xs text-gray-500 px-2 py-1">
+                No Paathshala matches "{pathshalaQuery}"
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Search */}
         <div className="relative">
           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-lg">🔍</span>
@@ -406,7 +615,7 @@ function CheckInApp({ onBack, onLogout }) {
             ref={inputRef}
             className="w-full border-2 border-gray-200 rounded-2xl pl-11 pr-10 py-3 text-base
                        focus:outline-none focus:border-saffron-500 bg-white shadow-sm"
-            placeholder="Type name or mobile number…"
+            placeholder="Type name, mobile, roll no, or Paathshala…"
             value={query}
             onChange={e => setQuery(e.target.value)}
             autoFocus
@@ -422,10 +631,20 @@ function CheckInApp({ onBack, onLogout }) {
         </div>
 
         <div className="flex items-center justify-between gap-2 text-xs text-gray-500 px-1">
-          <span>Showing {visibleCount} of {baseList.length} students</span>
+          <span>Showing {visibleCount} of {baseList.length} students {selectedPathshala === 'ALL' ? '' : 'in selected Paathshala'}</span>
           <span>
             Checked In: 👦 {checkedInBoys} • 👧 {checkedInGirls}
           </span>
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            onClick={requestBulkCheckIn}
+            disabled={bulkCheckingIn || total === 0}
+            className="px-3 py-1.5 rounded-xl bg-forest-700 text-white text-sm font-semibold hover:bg-forest-800 disabled:opacity-50"
+          >
+            {bulkCheckingIn ? 'Checking In…' : '✅ Check In All Pending'}
+          </button>
         </div>
 
         <div className="flex gap-2 overflow-x-auto pb-1">
@@ -439,10 +658,10 @@ function CheckInApp({ onBack, onLogout }) {
                   : 'border-gray-200 text-gray-600 hover:border-gray-300 bg-white'
               }`}
             >
-              {g === 'Boy'
-                ? `👦 Boys (${checkedInBoys}/${totalBoys})`
-                : g === 'Girl'
-                  ? `👧 Girls (${checkedInGirls}/${totalGirls})`
+              {g === 'Male'
+                ? `👦 Male (${checkedInBoys}/${totalBoys})`
+                : g === 'Female'
+                  ? `👧 Female (${checkedInGirls}/${totalGirls})`
                   : `All (${checkedCount}/${total})`}
             </button>
           ))}
@@ -511,6 +730,14 @@ function CheckInApp({ onBack, onLogout }) {
         onConfirm={confirmCheckIn}
         onCancel={() => setPendingCheckIn(null)}
         confirmLabel={pendingCheckIn?.isIn ? 'Undo' : 'Check In'}
+      />
+      <ConfirmDialog
+        open={!!pendingBulkCheckIn}
+        title="Check In Pending Students?"
+        message={pendingBulkCheckIn ? `${pendingBulkCheckIn.count} pending students in this Paathshala will be marked as checked in.` : ''}
+        onConfirm={confirmBulkCheckIn}
+        onCancel={() => setPendingBulkCheckIn(null)}
+        confirmLabel="Check In All"
       />
     </div>
   );

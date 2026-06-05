@@ -47,12 +47,30 @@ function coerceInts(data) {
   return out;
 }
 
+const onlyDigits = (v) => String(v || '').replace(/\D/g, '');
+
+// Generate a unique 4-digit PIN not already in the provided set.
+function generateUniquePin(usedPins) {
+  for (let i = 0; i < 100; i++) {
+    const pin = String(Math.floor(1000 + Math.random() * 9000));
+    if (!usedPins.has(pin)) { usedPins.add(pin); return pin; }
+  }
+  let n = 1000;
+  while (usedPins.has(String(n))) n++;
+  usedPins.add(String(n));
+  return String(n);
+}
+
+const hasTeacherRole = (roles) =>
+  (Array.isArray(roles) ? roles : []).some(r => /class\s*teacher|teacher/i.test(String(r || '')));
+
 export const usePathshalaStore = create(
   persist(
     (set, get) => ({
       paathshalas: [],
       students: [],    // students with paathshala_code set
       loading: false,
+      _teacherSyncRunning: false,
 
       fetchPathashalas: async () => {
         set({ loading: true });
@@ -79,6 +97,8 @@ export const usePathshalaStore = create(
         const { error } = await supabase.from('paathshalas').insert(newP);
         if (error) return { success: false, error: error.message };
         set(state => ({ paathshalas: [...state.paathshalas, newP] }));
+        // Auto-register this Paathshala's teacher(s) as teacher-only volunteers.
+        await get().syncPaathshalaTeachers(newP);
         return { success: true, code };
       },
 
@@ -88,7 +108,148 @@ export const usePathshalaStore = create(
         set(state => ({
           paathshalas: state.paathshalas.map(p => p.id === id ? { ...p, ...formData } : p),
         }));
+        const updated = get().paathshalas.find(p => p.id === id);
+        if (updated) await get().syncPaathshalaTeachers(updated);
         return { success: true };
+      },
+
+      // ── Auto-add Paathshala teachers as teacher-only volunteers ────────────
+      // Teacher1/Teacher2 of a Paathshala become volunteers with the single
+      // "Class Teacher" role (so they can ONLY log into the teacher portal) and
+      // carry their Paathshala name. New teachers get an auto-generated PIN.
+      // Best-effort: never blocks Paathshala creation if it fails.
+      syncPaathshalaTeachers: async (pathshala) => {
+        try {
+          const teachers = [
+            { name: pathshala.teacher1_name, mobile: pathshala.teacher1_mobile },
+            { name: pathshala.teacher2_name, mobile: pathshala.teacher2_mobile },
+          ].filter(t => String(t.name || '').trim());
+          if (!teachers.length) return { success: true, added: 0 };
+
+          // Fetch existing volunteers. Try with paathshala_code, but fall back
+          // gracefully if that column hasn't been added to the DB yet.
+          let existingRes = await supabase
+            .from('volunteers')
+            .select('id,name,mobile,pin,roles,paathshala_code');
+          if (existingRes.error) {
+            existingRes = await supabase
+              .from('volunteers')
+              .select('id,name,mobile,pin,roles');
+          }
+          const all = existingRes.data || [];
+          const usedPins = new Set(all.map(v => String(v.pin || '')).filter(Boolean));
+
+          let added = 0;
+          for (const t of teachers) {
+            const tName = String(t.name).trim();
+            const tMobile = onlyDigits(t.mobile);
+
+            let match = null;
+            if (tMobile) match = all.find(v => onlyDigits(v.mobile) === tMobile);
+            // No mobile to match on → fall back to name match so we update an
+            // existing same-name teacher instead of creating a duplicate.
+            if (!match) {
+              match = all.find(v =>
+                String(v.name || '').trim().toLowerCase() === tName.toLowerCase()
+              );
+            }
+
+            if (match) {
+              // Don't downgrade existing mentors — just ensure the teacher role
+              // is present and attach the Paathshala link.
+              const roles = Array.isArray(match.roles) ? match.roles : [];
+              const newRoles = hasTeacherRole(roles) ? roles : [...roles, 'Class Teacher'];
+              const mobilePatch = match.mobile ? {} : (t.mobile ? { mobile: t.mobile } : {});
+              const fullPayload = {
+                roles: newRoles,
+                paathshala: pathshala.paathshala_name,
+                paathshala_code: pathshala.paathshala_code,
+                ...mobilePatch,
+              };
+              let upd = await supabase.from('volunteers').update(fullPayload).eq('id', match.id);
+              if (upd.error) {
+                // Retry without paathshala columns (not migrated yet).
+                await supabase.from('volunteers')
+                  .update({ roles: newRoles, ...mobilePatch })
+                  .eq('id', match.id);
+              }
+            } else {
+              const pin = generateUniquePin(usedPins);
+              const base = {
+                id: `vt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                name: tName,
+                pin,
+                mobile: t.mobile || null,
+                roles: ['Class Teacher'],
+              };
+              const fullV = {
+                ...base,
+                paathshala: pathshala.paathshala_name,
+                paathshala_code: pathshala.paathshala_code,
+              };
+              let ins = await supabase.from('volunteers').insert(fullV);
+              if (ins.error) {
+                // Retry without paathshala columns (not migrated yet).
+                ins = await supabase.from('volunteers').insert(base);
+              }
+              if (!ins.error) { all.push(fullV); added++; }
+            }
+          }
+          return { success: true, added };
+        } catch (e) {
+          return { success: false, error: e?.message };
+        }
+      },
+
+      // Remove duplicate auto-added teacher volunteers (same mobile, or same
+      // name when no mobile). Only touches auto-created teachers (id "vt_…") so
+      // real mentors are never deleted. Keeps the row that has a Paathshala set.
+      dedupePaathshalaTeachers: async () => {
+        try {
+          const { data } = await supabase
+            .from('volunteers')
+            .select('id,name,mobile,pin,roles,paathshala,paathshala_code');
+          const autoTeachers = (data || []).filter(v => String(v.id || '').startsWith('vt_'));
+          const groups = new Map();
+          for (const v of autoTeachers) {
+            const key = onlyDigits(v.mobile) || `name:${String(v.name || '').trim().toLowerCase()}`;
+            if (!key) continue;
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(v);
+          }
+          const toDelete = [];
+          for (const [, list] of groups) {
+            if (list.length <= 1) continue;
+            const keep = list.find(v => v.paathshala) || list[0];
+            for (const v of list) if (v.id !== keep.id) toDelete.push(v.id);
+          }
+          if (toDelete.length) {
+            await supabase.from('volunteers').delete().in('id', toDelete);
+          }
+          return { removed: toDelete.length };
+        } catch (e) {
+          return { removed: 0, error: e?.message };
+        }
+      },
+
+      // Backfill teacher volunteers for every already-registered Paathshala.
+      // Guarded so overlapping/duplicate runs (e.g. React re-mounts) can't race
+      // and create duplicate teacher rows.
+      syncAllPaathshalaTeachers: async () => {
+        if (get()._teacherSyncRunning) return { success: false, skipped: true, added: 0 };
+        set({ _teacherSyncRunning: true });
+        try {
+          await get().dedupePaathshalaTeachers();
+          const { paathshalas } = get();
+          let added = 0;
+          for (const p of paathshalas) {
+            const r = await get().syncPaathshalaTeachers(p);
+            added += r?.added || 0;
+          }
+          return { success: true, added };
+        } finally {
+          set({ _teacherSyncRunning: false });
+        }
       },
 
       deletePathshala: async (id) => {
