@@ -141,8 +141,8 @@ function mentorHasDuty(mentor, area) {
 }
 
 const ROLES = ['Activity Coordinator', 'Zone Mentor', 'Class Teacher', 'Collection Mentor', 'Admin'];
-const DEFAULT_sessionKeys = ['1', '2', '3'];
-const DEFAULT_sessionLabels = {
+const DEFAULT_SESSION_KEYS = ['1', '2', '3'];
+const DEFAULT_SESSION_LABELS = {
   '1': 'Session 1 — Morning 1',
   '2': 'Session 2 — Morning 2',
   '3': 'Session 3 — Afternoon',
@@ -251,14 +251,14 @@ export default function AdminVolunteers() {
 
   const sessionKeys = classSessionEvents.length > 0
     ? classSessionEvents.map((_, i) => String(i + 1))
-    : DEFAULT_sessionKeys;
+    : DEFAULT_SESSION_KEYS;
 
   const sessionLabels = classSessionEvents.length > 0
     ? Object.fromEntries(classSessionEvents.map((ev, i) => [
         String(i + 1),
         ev.time_slot ? `${ev.name} (${ev.time_slot})` : ev.name,
       ]))
-    : DEFAULT_sessionLabels;
+    : DEFAULT_SESSION_LABELS;
 
   // Extract class options from Operations -> Events (event_type = "class").
   // Supports both code-style names ("1A", "Class 2B") and free names

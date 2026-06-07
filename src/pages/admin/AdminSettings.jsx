@@ -1,5 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { useConfigStore } from '../../store/useConfigStore.js';
+import { useTransactionStore } from '../../store/useTransactionStore.js';
+import { notifyCampConfigUpdated } from '../../lib/campDates.js';
+import { saveCampConfigToSupabase } from '../../lib/campConfigSync.js';
 import schemaSQL from '../../../supabase/schema.sql?raw';
 import addPointsRPC from '../../../supabase/add_points_rpc.sql?raw';
 
@@ -27,15 +31,34 @@ function Field({ label, children }) {
 
 const INPUT = "w-full border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-forest-500";
 
+function toDateInputValue(value) {
+  if (!value) return '';
+  const match = String(value).match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match) return match[1];
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
 export default function AdminSettings() {
   const config = useConfigStore();
 
-  // Camp info state
-  const [campName, setCampName] = useState(config.campName || '');
-  const [campCity, setCampCity] = useState(config.campCity || '');
-  const [startDate, setStartDate] = useState(config.campStartDate || '');
-  const [endDate, setEndDate] = useState(config.campEndDate || '');
+  // Camp info state — synced after zustand persist rehydrates from localStorage
+  const [campName, setCampName] = useState('');
+  const [campCity, setCampCity] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [campSaved, setCampSaved] = useState(false);
+  const [campSaving, setCampSaving] = useState(false);
+
+  useEffect(() => {
+    setCampName(config.campName || '');
+    setCampCity(config.campCity || '');
+    setStartDate(toDateInputValue(config.campStartDate || import.meta.env.VITE_CAMP_START_DATE || ''));
+    setEndDate(toDateInputValue(config.campEndDate || import.meta.env.VITE_CAMP_END_DATE || ''));
+  }, [config.campName, config.campCity, config.campStartDate, config.campEndDate]);
 
   // Password change state
   const [currentPwd, setCurrentPwd] = useState('');
@@ -55,13 +78,29 @@ export default function AdminSettings() {
   const [dbMsg, setDbMsg] = useState(null);
   const [schemaCopied, setSchemaCopied] = useState(false);
 
-  const saveCamp = () => {
-    const days = startDate && endDate
-      ? Math.max(1, Math.round((new Date(endDate) - new Date(startDate)) / 86400000) + 1)
-      : config.campTotalDays;
-    config.saveCampConfig({ campName, campCity, campStartDate: startDate, campEndDate: endDate, campTotalDays: days });
-    setCampSaved(true);
-    setTimeout(() => setCampSaved(false), 2000);
+  const saveCamp = async () => {
+    if (!startDate || !endDate) {
+      toast.error('Please set both start and end dates.');
+      return;
+    }
+    const days = Math.max(1, Math.round((new Date(endDate) - new Date(startDate)) / 86400000) + 1);
+    const payload = { campName, campCity, campStartDate: startDate, campEndDate: endDate, campTotalDays: days };
+    setCampSaving(true);
+    try {
+      config.saveCampConfig(payload);
+      useTransactionStore.getState().refreshCurrentDay();
+      notifyCampConfigUpdated();
+      const { error } = await saveCampConfigToSupabase(payload);
+      if (error) {
+        toast.error('Saved on this device, but cloud sync failed. Teachers may not see new dates yet.');
+      } else {
+        toast.success('Camp dates saved and synced for all users.');
+        setCampSaved(true);
+        setTimeout(() => setCampSaved(false), 2000);
+      }
+    } finally {
+      setCampSaving(false);
+    }
   };
 
   const changePassword = () => {
@@ -143,11 +182,15 @@ export default function AdminSettings() {
         </div>
         <button
           onClick={saveCamp}
-          className={`px-5 py-2 rounded-xl text-sm font-semibold text-white transition-all
+          disabled={campSaving}
+          className={`px-5 py-2 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-60
             ${campSaved ? 'bg-green-500' : 'bg-forest-700 hover:bg-forest-800'}`}
         >
-          {campSaved ? '✓ Saved' : 'Save Changes'}
+          {campSaving ? 'Saving…' : campSaved ? '✓ Saved' : 'Save Changes'}
         </button>
+        <p className="text-xs text-gray-500">
+          Dates sync to the cloud so teachers and mentors on any device see the same camp calendar.
+        </p>
       </Section>
 
       {/* Change Admin Password */}

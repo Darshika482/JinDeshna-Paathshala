@@ -7,8 +7,10 @@ import { useStudentStore } from '../../store/useStudentStore.js';
 import { useAttendanceStore } from '../../store/useAttendanceStore.js';
 import { useTransactionStore } from '../../store/useTransactionStore.js';
 import { usePathshalaStore } from '../../store/usePathshalaStore.js';
+import { getCampDayForDate, getAttendanceDateForToday, onCampConfigUpdated } from '../../lib/campDates.js';
 import LanguageToggle from '../../components/common/LanguageToggle.jsx';
 import OfflineBanner from '../../components/common/OfflineBanner.jsx';
+import AppLogo from '../../components/common/AppLogo.jsx';
 
 const onlyDigits = (v) => String(v || '').replace(/\D/g, '');
 
@@ -22,12 +24,58 @@ const STATUS_CONFIG = {
 };
 const STATUSES = ['present', 'absent', 'late', 'excused'];
 
-// Two morning sessions + one afternoon session
 const COLUMN_ACCENT = {
   1: { header: 'bg-amber-50 border-amber-200',   tab: 'border-amber-500 text-amber-700',  dot: 'bg-amber-500',  label: 'Morning 1' },
   2: { header: 'bg-orange-50 border-orange-200', tab: 'border-orange-500 text-orange-700', dot: 'bg-orange-500', label: 'Morning 2' },
   3: { header: 'bg-sky-50 border-sky-200',       tab: 'border-sky-500 text-sky-700',       dot: 'bg-sky-500',    label: 'Afternoon' },
 };
+
+const ACCENT_CYCLE = [
+  COLUMN_ACCENT[1],
+  COLUMN_ACCENT[2],
+  COLUMN_ACCENT[3],
+  { header: 'bg-violet-50 border-violet-200', tab: 'border-violet-500 text-violet-700', dot: 'bg-violet-500', label: 'Session' },
+  { header: 'bg-emerald-50 border-emerald-200', tab: 'border-emerald-500 text-emerald-700', dot: 'bg-emerald-500', label: 'Session' },
+];
+
+function accentFor(n) {
+  return COLUMN_ACCENT[n] || ACCENT_CYCLE[(Number(n) - 1) % ACCENT_CYCLE.length];
+}
+
+function sessionNumbersFor(classEvents) {
+  const count = Array.isArray(classEvents) && classEvents.length > 0 ? classEvents.length : 3;
+  return Array.from({ length: count }, (_, i) => i + 1);
+}
+
+// Class session names/times come from Admin → Operations → Events (event_type === 'class'),
+// ordered by sort_order. Session 1 = first class event, etc. Falls back to the static
+// COLUMN_ACCENT labels when admin hasn't defined class events yet.
+function useClassEvents() {
+  const [classEvents, setClassEvents] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () => supabase
+      .from('events')
+      .select('id,name,time_slot,sort_order')
+      .eq('is_active', true)
+      .eq('event_type', 'class')
+      .order('sort_order')
+      .order('name')
+      .then(({ data }) => { if (alive) setClassEvents(data || []); });
+    load();
+    return () => { alive = false; };
+  }, []);
+  return classEvents;
+}
+
+function sessionMetaFor(classEvents, n) {
+  const ev = Array.isArray(classEvents) ? classEvents[n - 1] : null;
+  const accent = accentFor(n);
+  return {
+    name: ev?.name || (n <= 3 ? accent.label : `Session ${n}`),
+    time: ev?.time_slot || '',
+  };
+}
 
 function normalizeAssignedClasses(user) {
   const fromArray = Array.isArray(user?.assigned_classes)
@@ -42,7 +90,7 @@ function normalizeAssignedClasses(user) {
 // Parse the per-session class map from the volunteer record. Falls back to
 // repeating the primary assigned class for every session so older teacher
 // rows (without a session map) still see all 3 columns populated.
-function normalizeSessionClasses(user, fallbackClasses) {
+function normalizeSessionClasses(user, fallbackClasses, sessionCount = 3) {
   let raw = user?.session_classes;
   if (typeof raw === 'string') {
     try { raw = JSON.parse(raw); } catch { raw = null; }
@@ -55,9 +103,9 @@ function normalizeSessionClasses(user, fallbackClasses) {
     }
   }
   if (!Object.keys(out).length && fallbackClasses?.[0]) {
-    out['1'] = fallbackClasses[0];
-    out['2'] = fallbackClasses[0];
-    out['3'] = fallbackClasses[0];
+    for (let n = 1; n <= sessionCount; n += 1) {
+      out[String(n)] = fallbackClasses[0];
+    }
   }
   return out;
 }
@@ -149,6 +197,8 @@ function ClassColumn({
   classNum,
   students,
   sessionClassCode,
+  sessionName,
+  sessionTime,
   currentUser,
   currentDay,
   isDesktop,
@@ -165,10 +215,12 @@ function ClassColumn({
   const [submitting, setSubmitting] = useState(false);
 
   const label = store.sessionLabels[classNum];
+  const headerName = sessionName || sessionMetaFor(null, classNum).name;
+  const headerSub = sessionTime || label;
   const submission = store.getSubmission(classNum, sessionClassCode);
   const editable = store.canEdit(classNum, sessionClassCode);
   const isLocked = !!submission && !editable;
-  const accent = COLUMN_ACCENT[classNum];
+  const accent = accentFor(classNum);
 
   const filtered = (() => {
     const q = search.toLowerCase().trim();
@@ -225,7 +277,7 @@ function ClassColumn({
               student_name: student.name,
               volunteer_id: currentUser?.id,
               volunteer_name: currentUser?.name,
-              activity: `Attendance — Class ${sessionClassCode} (${label})`,
+              activity: `Attendance — Class ${sessionClassCode} (${headerName})`,
               type: 'Digital',
               points: 5,
               coin_count: 0,
@@ -261,7 +313,7 @@ function ClassColumn({
       <div className={`rounded-t-2xl px-3.5 py-3 md:p-4 border-b flex-shrink-0 ${accent.header}`}>
         <div className="flex items-center gap-1.5 mb-0.5">
           <div className={`w-2 h-2 rounded-full flex-shrink-0 ${accent.dot}`} />
-          <span className="font-bold text-gray-800 text-base">Class {classNum}</span>
+          <span className="font-bold text-gray-800 text-base">{headerName}</span>
           {sessionClassCode ? (
             <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-white/80 text-saffron-700 border border-saffron-200">
               📚 {sessionClassCode}
@@ -305,7 +357,7 @@ function ClassColumn({
             <button onClick={() => setEditingLabel(false)} className="text-gray-400 text-sm px-1">✕</button>
           </div>
         ) : (
-          <div className="text-xs text-gray-500 ml-3.5">{label}</div>
+          <div className="text-xs text-gray-500 ml-3.5">{headerSub}</div>
         )}
 
         <div className="flex flex-wrap gap-1.5 mt-2.5">
@@ -397,6 +449,7 @@ function ClassColumn({
 function AttendanceTab({
   studentsBySession,
   sessionClasses,
+  classEvents,
   loading,
   currentUser,
   currentDay,
@@ -405,6 +458,7 @@ function AttendanceTab({
   const store = useAttendanceStore();
   const [activeClass, setActiveClass] = useState(1);
   const [fullscreenClass, setFullscreenClass] = useState(null);
+  const sessionNumbers = sessionNumbersFor(classEvents);
 
   const toggleFullscreen = (classNum) => {
     setFullscreenClass((prev) => (prev === classNum ? null : classNum));
@@ -418,14 +472,25 @@ function AttendanceTab({
     return () => window.removeEventListener('keydown', onEsc);
   }, []);
 
-  const columnFor = (n) => ({
-    students: studentsBySession[n] || [],
-    sessionClassCode: sessionClasses[String(n)] || '',
-    currentUser,
-    currentDay,
-    onToggleFullscreen: () => toggleFullscreen(n),
-    isFullscreen: fullscreenClass === n,
-  });
+  useEffect(() => {
+    if (!sessionNumbers.includes(activeClass)) {
+      setActiveClass(sessionNumbers[0] || 1);
+    }
+  }, [activeClass, sessionNumbers]);
+
+  const columnFor = (n) => {
+    const meta = sessionMetaFor(classEvents, n);
+    return {
+      students: studentsBySession[n] || [],
+      sessionClassCode: sessionClasses[String(n)] || '',
+      sessionName: meta.name,
+      sessionTime: meta.time,
+      currentUser,
+      currentDay,
+      onToggleFullscreen: () => toggleFullscreen(n),
+      isFullscreen: fullscreenClass === n,
+    };
+  };
 
   return (
     <>
@@ -435,8 +500,7 @@ function AttendanceTab({
             <div className="text-3xl mb-2">📚</div>
             <div className="font-semibold text-gray-800">No sessions assigned</div>
             <div className="text-sm text-gray-500 mt-1">
-              Ask admin to set a class for at least one session in your teacher profile
-              (Session 1 / 2 / 3 → student class).
+              Ask admin to set a class for at least one session in your teacher profile.
             </div>
           </div>
         </div>
@@ -451,9 +515,10 @@ function AttendanceTab({
             Today's Sessions
           </div>
           <div className="flex flex-wrap gap-2">
-            {[1, 2, 3].map(n => {
+            {sessionNumbers.map(n => {
               const code = sessionClasses[String(n)];
-              const acc = COLUMN_ACCENT[n];
+              const acc = accentFor(n);
+              const meta = sessionMetaFor(classEvents, n);
               return (
                 <span
                   key={n}
@@ -464,7 +529,7 @@ function AttendanceTab({
                   }`}
                 >
                   <span className={`w-1.5 h-1.5 rounded-full ${acc.dot}`} />
-                  {acc.label}: {code || 'Unassigned'}
+                  {meta.name}{meta.time ? ` · ${meta.time}` : ''}: {code || 'Unassigned'}
                 </span>
               );
             })}
@@ -474,19 +539,20 @@ function AttendanceTab({
 
       {/* Mobile class tab bar */}
       <div className="md:hidden bg-white border-b border-gray-200 flex-shrink-0">
-        <div className="flex">
-          {[1, 2, 3].map(n => {
-            const acc = COLUMN_ACCENT[n];
+        <div className="flex overflow-x-auto">
+          {sessionNumbers.map(n => {
+            const acc = accentFor(n);
             const active = activeClass === n;
             const code = sessionClasses[String(n)];
+            const meta = sessionMetaFor(classEvents, n);
             const submission = store.getSubmission(n, code);
             return (
               <button
                 key={n}
                 onClick={() => setActiveClass(n)}
-                className={`flex-1 py-2.5 px-2 text-center border-b-2 transition-colors ${active ? acc.tab : 'border-transparent text-gray-400'}`}
+                className={`min-w-[8.5rem] flex-1 py-2.5 px-2 text-center border-b-2 transition-colors ${active ? acc.tab : 'border-transparent text-gray-400'}`}
               >
-                <div className={`text-sm font-bold ${active ? '' : 'text-gray-500'}`}>{acc.label}</div>
+                <div className={`text-sm font-bold ${active ? '' : 'text-gray-500'}`}>{meta.name}</div>
                 <div className="text-[11px] mt-0.5 font-semibold opacity-80 truncate">
                   {code || '—'}
                 </div>
@@ -508,14 +574,10 @@ function AttendanceTab({
 
       {!loading && hasAnyAssignment && (
         <>
-          {/* Desktop: 3 columns side-by-side. Using flex (not grid) so each
-              column actually clamps to the available viewport height — grid
-              auto-rows were letting the row grow with content, which made
-              the inner list `overflow-y-auto` never get a bounded height
-              and so it never showed a scrollbar. */}
-          <div className="hidden md:flex flex-1 min-h-0 gap-4 px-4 lg:px-6 py-4 mx-auto w-full max-w-[1600px]">
-            {[1, 2, 3].map(n => (
-              <div key={n} className="flex-1 min-w-0 min-h-0 flex flex-col">
+          {/* Desktop: dynamic class-event columns from Admin → Operations → Events. */}
+          <div className="hidden md:flex flex-1 min-h-0 gap-4 px-4 lg:px-6 py-4 mx-auto w-full max-w-[1600px] overflow-x-auto">
+            {sessionNumbers.map(n => (
+              <div key={n} className="w-[22rem] max-w-[28rem] flex-shrink-0 min-h-0 flex flex-col">
                 <ClassColumn classNum={n} {...columnFor(n)} isDesktop />
               </div>
             ))}
@@ -542,16 +604,23 @@ function AttendanceTab({
 
 // ─── My Info Tab ──────────────────────────────────────────────────────────────
 
-function MyInfoTab({ currentUser }) {
+function MyInfoTab({ currentUser, classEvents }) {
   const store = useAttendanceStore();
+  const [campInfo, setCampInfo] = useState(() => getAttendanceDateForToday());
+  useEffect(() => {
+    setCampInfo(getAttendanceDateForToday());
+    return onCampConfigUpdated(() => setCampInfo(getAttendanceDateForToday()));
+  }, []);
   const todayStr = format(new Date(), 'EEEE, d MMMM yyyy');
   const assignedClasses = normalizeAssignedClasses(currentUser);
-  const sessionClasses = normalizeSessionClasses(currentUser, assignedClasses);
-  const sessionResponsibilities = [1, 2, 3]
+  const sessionNumbers = sessionNumbersFor(classEvents);
+  const sessionClasses = normalizeSessionClasses(currentUser, assignedClasses, sessionNumbers.length);
+  const sessionResponsibilities = sessionNumbers
     .map(n => {
       const code = sessionClasses[String(n)];
       if (!code) return null;
-      return `📚 ${COLUMN_ACCENT[n].label}: Class ${code} teaching`;
+      const meta = sessionMetaFor(classEvents, n);
+      return `📚 ${meta.name}: Class ${code} teaching`;
     })
     .filter(Boolean);
 
@@ -561,7 +630,7 @@ function MyInfoTab({ currentUser }) {
     r => !/class\s+[a-z]+\d+/i.test(String(r || ''))
   );
 
-  const totalSubmitted = [1, 2, 3].filter(n => store.getSubmission(n, sessionClasses[String(n)])).length;
+  const totalSubmitted = sessionNumbers.filter(n => store.getSubmission(n, sessionClasses[String(n)])).length;
 
   return (
     <div className="flex-1 overflow-y-auto p-4 pb-28 max-w-2xl mx-auto w-full space-y-4">
@@ -585,16 +654,29 @@ function MyInfoTab({ currentUser }) {
 
       {/* Today's summary */}
       <div className="card p-4">
-        <div className="text-xs text-gray-400 font-medium mb-3 uppercase tracking-wide">Today — {todayStr}</div>
-        <div className="grid grid-cols-3 gap-3">
-          {[1, 2, 3].map(n => {
-            const acc = COLUMN_ACCENT[n];
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="text-xs text-gray-400 font-medium uppercase tracking-wide">Today — {todayStr}</div>
+          {campInfo.active ? (
+            <span className="text-[11px] font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full whitespace-nowrap">
+              Day {campInfo.day}
+            </span>
+          ) : (
+            <span className="text-[11px] font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full whitespace-nowrap">
+              Camp not active
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {sessionNumbers.map(n => {
+            const acc = accentFor(n);
             const code = sessionClasses[String(n)];
+            const meta = sessionMetaFor(classEvents, n);
             const submission = store.getSubmission(n, code);
             return (
               <div key={n} className={`rounded-xl p-3 text-center border ${submission ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
                 <div className={`w-2 h-2 rounded-full mx-auto mb-1 ${acc.dot}`} />
-                <div className="text-xs font-bold text-gray-700">{acc.label}</div>
+                <div className="text-xs font-bold text-gray-700 leading-tight">{meta.name}</div>
+                {meta.time && <div className="text-[10px] text-gray-400 mt-0.5">{meta.time}</div>}
                 <div className="text-[11px] font-semibold text-saffron-700 mt-0.5">
                   {code ? `📚 ${code}` : '—'}
                 </div>
@@ -606,7 +688,7 @@ function MyInfoTab({ currentUser }) {
           })}
         </div>
         <div className="mt-3 text-center text-sm text-gray-500">
-          <span className="font-semibold text-forest-700">{totalSubmitted}/3</span> sessions submitted today
+          <span className="font-semibold text-forest-700">{totalSubmitted}/{sessionNumbers.length}</span> sessions submitted today
         </div>
       </div>
 
@@ -620,8 +702,9 @@ function MyInfoTab({ currentUser }) {
                 <>
                   <div className="text-xs text-gray-400 font-medium">Per-Session Class Assignment</div>
                   <div className="mt-1 flex flex-wrap gap-1.5">
-                    {[1, 2, 3].map(n => {
+                    {sessionNumbers.map(n => {
                       const code = sessionClasses[String(n)];
+                      const meta = sessionMetaFor(classEvents, n);
                       return (
                         <span
                           key={n}
@@ -631,7 +714,7 @@ function MyInfoTab({ currentUser }) {
                               : 'bg-gray-50 border-gray-200 text-gray-400'
                           }`}
                         >
-                          {COLUMN_ACCENT[n].label}: {code || '—'}
+                          {meta.name}: {code || '—'}
                         </span>
                       );
                     })}
@@ -740,6 +823,18 @@ function PaathshalaAttendanceTab({ currentUser, currentDay }) {
   const editable = classCode ? store.canEdit(sessionNum, classCode) : true;
   const isLocked = !!submission && !editable;
   const stats = classCode ? store.getStats(sessionNum, classCode, myStudents) : { present: 0, absent: 0, late: 0, excused: 0, total: 0 };
+
+  const attendanceDateLabel = (() => {
+    const { iso, day, active } = getAttendanceDateForToday();
+    const [y, m, d] = iso.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    return {
+      long: format(date, 'EEEE, d MMMM yyyy'),
+      short: format(date, 'd MMM yyyy'),
+      day,
+      active,
+    };
+  })();
 
   const filtered = (() => {
     const q = search.toLowerCase().trim();
@@ -908,6 +1003,24 @@ function PaathshalaAttendanceTab({ currentUser, currentDay }) {
                 </div>
                 {isLocked && <span className="text-xs font-semibold text-gray-400">🔒 Locked</span>}
               </div>
+              <div className={`mt-2 inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 ${
+                attendanceDateLabel.active
+                  ? 'bg-blue-50 border-blue-200'
+                  : 'bg-amber-50 border-amber-200'
+              }`}>
+                <span className={`text-xs font-semibold ${attendanceDateLabel.active ? 'text-blue-800' : 'text-amber-800'}`}>
+                  📅 {attendanceDateLabel.active ? 'Attendance date: ' : 'Today: '}{attendanceDateLabel.long}
+                </span>
+                {attendanceDateLabel.active ? (
+                  <span className="text-[11px] font-semibold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
+                    Day {attendanceDateLabel.day}
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                    Camp not active
+                  </span>
+                )}
+              </div>
               <div className="flex flex-wrap gap-1.5 mt-2">
                 <span className="text-xs font-semibold px-2 py-1 rounded-full bg-green-100 text-green-700">✅ {stats.present}</span>
                 <span className="text-xs font-semibold px-2 py-1 rounded-full bg-red-100 text-red-700">❌ {stats.absent}</span>
@@ -976,10 +1089,12 @@ function PaathshalaAttendanceTab({ currentUser, currentDay }) {
                   disabled={submitting || myStudents.length === 0}
                   className="btn-primary w-full py-3 text-base disabled:opacity-60"
                 >
-                  {submitting ? 'Submitting…' : 'Submit Attendance'}
+                  {submitting ? 'Submitting…' : `Submit Attendance · ${attendanceDateLabel.short}`}
                 </button>
               )}
-              <div className="text-[11px] text-gray-400 text-center mt-2">No points are awarded for Paathshala attendance.</div>
+              <div className="text-[11px] text-gray-400 text-center mt-2">
+                No points are awarded for Paathshala attendance. Records are saved for {attendanceDateLabel.long}.
+              </div>
             </div>
           </div>
         </>
@@ -999,17 +1114,28 @@ const TABS = [
 export default function TeacherAttendanceApp() {
   const { currentUser, logout } = useAuthStore();
   const { students, loading } = useStudentStore();
-  const { currentDay } = useTransactionStore();
+  const refreshCurrentDay = useTransactionStore(s => s.refreshCurrentDay);
   const { fetchAttendance } = useAttendanceStore();
+  const classEvents = useClassEvents();
+  const [campDay, setCampDay] = useState(() => getCampDayForDate(new Date()));
 
   const [activeTab, setActiveTab] = useState('attendance');
 
-  useEffect(() => { fetchAttendance(); }, []);
+  useEffect(() => {
+    refreshCurrentDay();
+    setCampDay(getCampDayForDate(new Date()));
+    fetchAttendance();
+    return onCampConfigUpdated(() => {
+      refreshCurrentDay();
+      setCampDay(getCampDayForDate(new Date()));
+    });
+  }, [refreshCurrentDay, fetchAttendance]);
 
+  const sessionNumbers = sessionNumbersFor(classEvents);
   const assignedClassOptions = normalizeAssignedClasses(currentUser);
-  const sessionClasses = normalizeSessionClasses(currentUser, assignedClassOptions);
+  const sessionClasses = normalizeSessionClasses(currentUser, assignedClassOptions, sessionNumbers.length);
   const teacherClassList = [...new Set(
-    [1, 2, 3]
+    sessionNumbers
       .map(n => String(sessionClasses[String(n)] || '').trim())
       .filter(Boolean)
   )];
@@ -1017,7 +1143,7 @@ export default function TeacherAttendanceApp() {
   const studentsBySession = (() => {
     const cache = new Map();
     const out = {};
-    for (const n of [1, 2, 3]) {
+    for (const n of sessionNumbers) {
       const code = sessionClasses[String(n)];
       if (!code) { out[n] = []; continue; }
       if (!cache.has(code)) {
@@ -1028,7 +1154,7 @@ export default function TeacherAttendanceApp() {
     return out;
   })();
 
-  const hasAnyAssignment = [1, 2, 3].some(n => sessionClasses[String(n)]);
+  const hasAnyAssignment = sessionNumbers.some(n => sessionClasses[String(n)]);
 
   const todayStr = format(new Date(), 'EEEE, d MMMM yyyy');
 
@@ -1039,11 +1165,14 @@ export default function TeacherAttendanceApp() {
       {/* Header */}
       <div className="bg-forest-700 text-white px-3 md:px-4 py-2.5 md:py-3 flex-shrink-0">
         <div className="flex items-center justify-between gap-2 max-w-[1600px] mx-auto w-full">
-          <div className="min-w-0">
-            <div className="font-bold text-base md:text-lg leading-tight truncate">{currentUser?.name || 'Teacher'}</div>
-            <div className="text-forest-200 text-[11px] md:text-sm mt-0.5 truncate">
-              <span className="md:hidden">Teacher Portal</span>
-              <span className="hidden md:inline">{todayStr}</span>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <AppLogo size="sm" showRing className="hidden sm:block" />
+            <div className="min-w-0">
+              <div className="font-bold text-base md:text-lg leading-tight truncate">{currentUser?.name || 'Teacher'}</div>
+              <div className="text-forest-200 text-[11px] md:text-sm mt-0.5 truncate">
+                <span className="md:hidden">Teacher Portal</span>
+                <span className="hidden md:inline">{todayStr}</span>
+              </div>
             </div>
           </div>
 
@@ -1090,20 +1219,21 @@ export default function TeacherAttendanceApp() {
           <AttendanceTab
             studentsBySession={studentsBySession}
             sessionClasses={sessionClasses}
+            classEvents={classEvents}
             loading={loading}
             currentUser={currentUser}
-            currentDay={currentDay}
+            currentDay={campDay}
             hasAnyAssignment={hasAnyAssignment}
           />
         )}
         {activeTab === 'paathshala' && (
           <PaathshalaAttendanceTab
             currentUser={currentUser}
-            currentDay={currentDay}
+            currentDay={campDay}
           />
         )}
         {activeTab === 'myinfo' && (
-          <MyInfoTab currentUser={currentUser} />
+          <MyInfoTab currentUser={currentUser} classEvents={classEvents} />
         )}
       </div>
 

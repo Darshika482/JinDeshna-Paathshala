@@ -7,7 +7,7 @@
 
 // Public site URL. Override at build time with VITE_APP_URL if the app
 // ever moves to a different host.
-const APP_URL = (import.meta.env.VITE_APP_URL || 'https://shivir.vercel.app').replace(/\/+$/, '');
+const APP_URL = (import.meta.env.VITE_APP_URL || 'https://jin-deshna-paathshala.vercel.app').replace(/\/+$/, '');
 
 // Default country code used when a mobile number is given without one.
 // India by default; adjust if/when the camp expands beyond IN numbers.
@@ -71,7 +71,7 @@ export function buildPinMessage(volunteer) {
   const link = `${APP_URL}/login?role=${encodeURIComponent(loginRole)}`;
 
   return [
-    '🪷 *Bal Sanskar Shivir 2026*',
+    '🪷 *Jindeshna Interpaathshala competition 2026*',
     '',
     `Namaste ${name} 🙏`,
     '',
@@ -82,7 +82,7 @@ export function buildPinMessage(volunteer) {
     '',
     `Open the link, choose "${label}", and enter your 4-digit PIN to log in.`,
     '',
-    '— Shivir Team',
+    '- JinDeshna Team',
   ].join('\n');
 }
 

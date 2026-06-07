@@ -6,6 +6,7 @@ import { useStudentStore } from './store/useStudentStore.js';
 import { useVolunteerStore } from './store/useVolunteerStore.js';
 import { useTransactionStore } from './store/useTransactionStore.js';
 import { useCoinStore } from './store/useCoinStore.js';
+import { fetchCampConfigFromSupabase } from './lib/campConfigSync.js';
 import LoginPage from './pages/auth/LoginPage.jsx';
 import VolunteerApp from './pages/volunteer/VolunteerApp.jsx';
 import CoordinatorApp from './pages/coordinator/CoordinatorApp.jsx';
@@ -26,14 +27,18 @@ function AppInitializer() {
   const syncPendingMentorEntries = useTransactionStore(s => s.syncPendingMentorEntries);
   const fetchCoins = useCoinStore(s => s.fetchCoins);
   useEffect(() => {
-    fetchStudents();
-    fetchVolunteers();
-    fetchTransactions();
-    fetchCoins();
-    setupPointAutoSync();
-    setupTransactionAutoSync();
-    syncPendingPointUpdates();
-    syncPendingMentorEntries();
+    (async () => {
+      await fetchCampConfigFromSupabase();
+      useTransactionStore.getState().refreshCurrentDay();
+      fetchStudents();
+      fetchVolunteers();
+      fetchTransactions();
+      fetchCoins();
+      setupPointAutoSync();
+      setupTransactionAutoSync();
+      syncPendingPointUpdates();
+      syncPendingMentorEntries();
+    })();
   }, []);
   return null;
 }

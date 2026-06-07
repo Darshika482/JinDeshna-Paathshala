@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { supabase } from '../lib/supabase.js';
-import { getCampDayForDate } from '../lib/campDates.js';
+import { getCampDayForDate, notifyCampConfigUpdated } from '../lib/campDates.js';
 import { useStudentStore } from './useStudentStore.js';
 
 const TX_PENDING = 'pending';
@@ -360,23 +360,24 @@ export const useTransactionStore = create(
     }),
     {
       name: 'shivir-transactions',
-      version: 2,
+      version: 3,
       migrate: (persistedState, version) => {
         if (!persistedState || typeof persistedState !== 'object') return persistedState;
-        if (version >= 2) return persistedState;
-        return {
-          ...persistedState,
-          // Drop legacy persisted rows that could contain old demo transactions.
-          // Live data is re-fetched from Supabase on app load.
-          transactions: [],
-        };
+        const next = version >= 2
+          ? { ...persistedState }
+          : { ...persistedState, transactions: [] };
+        // Always recalculate camp day from admin calendar — never trust a stale persisted value.
+        delete next.currentDay;
+        return next;
       },
       partialize: (state) => ({
         transactions: state.transactions,
         pendingMentorEntries: state.pendingMentorEntries,
-        currentDay: state.currentDay,
         currentSlot: state.currentSlot,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state) state.currentDay = getCampDayForDate();
+      },
     }
   )
 );

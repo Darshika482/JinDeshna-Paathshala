@@ -6,7 +6,7 @@ import { useVolunteerStore } from '../../store/useVolunteerStore.js';
 import { useAttendanceStore } from '../../store/useAttendanceStore.js';
 import { useTransactionStore } from '../../store/useTransactionStore.js';
 import { CLASS_TEACHER_NAMES, getTeacherNameForClass } from '../../lib/classTeachers.js';
-import { CAMP_TOTAL_DAYS, getDateForCampDay } from '../../lib/campDates.js';
+import { getCampTotalDays, getDateForCampDay } from '../../lib/campDates.js';
 import { useConfigStore, DEFAULT_BATCH_CLASSES } from '../../store/useConfigStore.js';
 
 const SESSION_KEYS = [1, 2, 3];
@@ -585,7 +585,7 @@ export default function AdminClasses() {
                     onChange={(e) => setResetDay(Number(e.target.value))}
                     className="border border-gray-300 rounded-lg px-2 py-1 text-sm"
                   >
-                    {Array.from({ length: CAMP_TOTAL_DAYS }, (_, i) => i + 1).map((day) => (
+                    {Array.from({ length: getCampTotalDays() }, (_, i) => i + 1).map((day) => (
                       <option key={day} value={day}>
                         Day {day} ({getDateForCampDay(day)})
                       </option>

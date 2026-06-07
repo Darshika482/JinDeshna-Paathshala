@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../../store/useAuthStore.js';
 import { useConfigStore } from '../../store/useConfigStore.js';
 import LanguageToggle from '../../components/common/LanguageToggle.jsx';
+import AppLogo from '../../components/common/AppLogo.jsx';
 
 const ROLES = [
   { key: 'mentor', icon: '🙋', routeAfter: '/mentor/actions', pinLogin: true },
@@ -105,15 +106,15 @@ export default function LoginPage() {
     <div className="mobile-container bg-gradient-to-b from-forest-700 to-forest-800 flex flex-col min-h-screen">
       {/* Header */}
       <div className="flex items-center justify-between px-4 sm:px-6 pt-7 pb-5 max-w-3xl mx-auto w-full">
-        <div>
-          <h1 className="text-[1.85rem] leading-tight font-bold text-white">{campName}</h1>
-          <p className="text-forest-200 text-sm mt-1">{campCity}</p>
+        <div className="flex items-center gap-3 min-w-0">
+          <AppLogo size="lg" showRing />
+          <div className="min-w-0">
+            <h1 className="text-[1.85rem] leading-tight font-bold text-white truncate">{campName}</h1>
+            <p className="text-forest-200 text-sm mt-1 truncate">{campCity}</p>
+          </div>
         </div>
         <LanguageToggle />
       </div>
-
-      {/* Lotus decoration */}
-      <div className="text-center text-6xl mb-3">🪷</div>
 
       <div className="flex-1 bg-gray-50 rounded-t-[2rem] pt-6 pb-8 shadow-[0_-8px_24px_rgba(0,0,0,0.12)]">
         <div className="max-w-3xl mx-auto px-4 sm:px-6">

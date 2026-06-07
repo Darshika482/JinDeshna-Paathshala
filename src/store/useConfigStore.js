@@ -21,7 +21,7 @@ export const useConfigStore = create(
       isSetupComplete: true,
       batchClasses: null, // null = use DEFAULT_BATCH_CLASSES
 
-      saveCampConfig: (cfg) => set(cfg),
+      saveCampConfig: (cfg) => set((state) => ({ ...state, ...cfg })),
       saveBatchClasses: (batchClasses) => set({ batchClasses }),
       resetConfig: () => set({ campName: 'JinDeshna Paathshala', isSetupComplete: true, batchClasses: null }),
     }),

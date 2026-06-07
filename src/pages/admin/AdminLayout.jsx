@@ -4,13 +4,14 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/useAuthStore.js';
 import LanguageToggle from '../../components/common/LanguageToggle.jsx';
 import OfflineBanner from '../../components/common/OfflineBanner.jsx';
+import AppLogo from '../../components/common/AppLogo.jsx';
 import AdminDashboard from './AdminDashboard.jsx';
 import AdminLeaderboard from './AdminLeaderboard.jsx';
 import AdminTransactions from './AdminTransactions.jsx';
 import AdminVolunteers from './AdminVolunteers.jsx';
 import AdminCheckInRecords from './AdminCheckInRecords.jsx';
 import AdminOperations from './AdminOperations.jsx';
-import AdminClasses from './AdminClasses.jsx';
+import AdminAttendance from './AdminAttendance.jsx';
 import AdminSettings from './AdminSettings.jsx';
 import AdminPathshala from './AdminPathshala.jsx';
 import AdminPointReasons from './AdminPointReasons.jsx';
@@ -19,6 +20,7 @@ import { useConfigStore } from '../../store/useConfigStore.js';
 const NAV_ITEMS = [
   { key: 'dashboard',     icon: '📊', label: 'admin.dashboard' },
   { key: 'checkIn',       icon: '✅', label: 'admin.checkIn' },
+  { key: 'attendance',    icon: '📋', label: 'admin.attendance' },
   { key: 'classes',       icon: '🏫', label: 'admin.pathshala' },
   { key: 'leaderboard',   icon: '🏆', label: 'admin.leaderboard' },
   { key: 'transactions',  icon: '📝', label: 'admin.transactions' },
@@ -31,6 +33,7 @@ const NAV_ITEMS = [
 const PAGES = {
   dashboard:     AdminDashboard,
   checkIn:       AdminCheckInRecords,
+  attendance:    AdminAttendance,
   classes:       AdminPathshala,
   leaderboard:   AdminLeaderboard,
   transactions:  AdminTransactions,
@@ -79,8 +82,9 @@ export default function AdminLayout() {
       `}>
         <div className="p-3 flex items-center gap-2 border-b border-forest-600">
           <button onClick={() => setSidebarOpen(s => !s)} className="text-white text-xl p-1 flex-shrink-0">☰</button>
+          <AppLogo size="sm" showRing className={sidebarOpen ? '' : 'mx-auto'} />
           {sidebarOpen && (
-            <div className="overflow-hidden">
+            <div className="overflow-hidden min-w-0">
               <div className="font-bold text-sm whitespace-nowrap truncate max-w-[140px]">{campName}</div>
               <div className="text-xs text-forest-300 whitespace-nowrap">Admin Panel</div>
             </div>
@@ -126,6 +130,7 @@ export default function AdminLayout() {
           <h2 className="font-bold text-lg text-forest-700 flex-1 truncate">
             {t(NAV_ITEMS.find(n => n.key === activePage)?.label || '')}
           </h2>
+          <AppLogo size="xs" className="hidden sm:block" />
           <div className="flex items-center gap-3">
             <LanguageToggle />
             <div className="text-sm text-gray-600 hidden sm:block">🔐 Admin</div>

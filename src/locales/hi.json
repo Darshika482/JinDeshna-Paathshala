@@ -152,6 +152,7 @@
   },
   "admin": {
     "checkIn": "चेक-इन",
+    "attendance": "उपस्थिति",
     "dashboard": "डैशबोर्ड",
     "students": "छात्र",
     "classes": "कक्षाएं",

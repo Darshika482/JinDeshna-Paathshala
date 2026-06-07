@@ -152,6 +152,7 @@
   },
   "admin": {
     "checkIn": "Check-In Records",
+    "attendance": "Attendance",
     "dashboard": "Dashboard",
     "students": "Students",
     "classes": "Classes",
