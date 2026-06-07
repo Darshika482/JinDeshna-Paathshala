@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStudentStore } from '../../store/useStudentStore.js';
 import { useTransactionStore } from '../../store/useTransactionStore.js';
@@ -21,6 +21,15 @@ const naturalSort = (a, b) => a.localeCompare(b, undefined, { numeric: true, sen
 const normalize = (v) => String(v || '').trim().toLowerCase();
 const normalizeRoll = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const isAttendanceTransaction = (tx) => /attendance\s*[—-]\s*class/i.test(String(tx?.activity || ''));
+
+function getStudentPaathshalaName(student, codeToName) {
+  const code = String(student?.paathshala_code || '').trim();
+  return codeToName[code] || student?.pathshala || student?.paathshala || '';
+}
+
+function getStudentFatherName(student) {
+  return student?.father_name || student?.parent_name || '';
+}
 
 // ── Export helpers ─────────────────────────────────────────────────────────
 const escapeCSV = (cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`;
@@ -561,6 +570,11 @@ export default function AdminLeaderboard() {
   }, {});
 
   // Fair attendance: +5 per unique day with attendance, only for days >= student's join day
+  const codeToPaathshalaName = useMemo(
+    () => Object.fromEntries(paathshalas.map((p) => [String(p.paathshala_code), p.paathshala_name])),
+    [paathshalas]
+  );
+
   const fairAttendanceByStudent = {};
   students.forEach(s => {
     const joinDay = s.checked_in_at ? getCampDayForDate(new Date(s.checked_in_at)) : 1;
@@ -590,6 +604,8 @@ export default function AdminLeaderboard() {
       const txSum = Number(txSumByStudent[sid] || 0);
       return {
         ...s,
+        paathshala_name: getStudentPaathshalaName(s, codeToPaathshalaName),
+        father_name_display: getStudentFatherName(s),
         original_total_points: originalPoints,
         tx_total: txSum,
         attendance_points_raw:  rawAttendance,
@@ -620,7 +636,9 @@ export default function AdminLeaderboard() {
       searchQuery === '' ||
       normalize(s.name).includes(q) ||
       normalize(String(s.roll_no || '')).includes(q) ||
-      normalizeRoll(s.roll_no).includes(qRoll)
+      normalizeRoll(s.roll_no).includes(qRoll) ||
+      normalize(s.paathshala_name).includes(q) ||
+      normalize(s.father_name_display).includes(q)
     ) &&
     (filterBatch  === 'All' || normalizeAgeGroup(s.batch) === filterBatch) &&
     (filterClass  === 'All' || s.class === filterClass) &&
@@ -666,9 +684,6 @@ export default function AdminLeaderboard() {
     .sort((a, b) => b.compPoints - a.compPoints)
     .map((s, i) => ({ ...s, rank: i + 1 }));
 
-  const codeToPaathshalaName = Object.fromEntries(
-    paathshalas.map(p => [String(p.paathshala_code), p.paathshala_name])
-  );
   const compPerPaathshala = {};
   students.forEach(s => {
     const pts = compPerStudent[String(s.id || '').trim()] || 0;
@@ -731,9 +746,9 @@ export default function AdminLeaderboard() {
     return {
       title: 'Student Rankings',
       filename: `leaderboard_students_${today}`,
-      headers: ['Rank', 'Name', 'Roll', 'Class', 'Batch', 'Room', 'Group', 'Gender', 'Age', 'Total Points', 'Category'],
+      headers: ['Rank', 'Name', 'Children Roll No', 'Paathshala Name', "Father's Name", 'Room', 'Group', 'Gender', 'Age', 'Total Points', 'Category'],
       rows: filtered.map(s => [
-        s.rank, s.name, s.roll_no || '', s.class || '', normalizeAgeGroup(s.batch) || '',
+        s.rank, s.name, s.roll_no || '', s.paathshala_name || '', s.father_name_display || '',
         s.room_no || '', s.group || '', normalizeGender(s.gender) || '', s.age || '',
         s.total_points, s.category,
       ]),
@@ -751,7 +766,7 @@ export default function AdminLeaderboard() {
   };
 
   return (
-    <div className="p-3 sm:p-6">
+    <div className="p-3 sm:p-6 min-w-0 max-w-full">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <div>
@@ -1059,7 +1074,7 @@ export default function AdminLeaderboard() {
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
         <input
           type="text"
-          placeholder="Search by student name or roll no…"
+          placeholder="Search name, roll no, paathshala, father…"
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
           className="w-full pl-9 pr-9 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-saffron-400 bg-white shadow-sm"
@@ -1114,34 +1129,54 @@ export default function AdminLeaderboard() {
         <div className="self-end text-sm text-gray-500 pb-1 sm:pb-2">{filtered.length} of {leaderboard.length}</div>
       </div>
 
-      {/* Mobile cards */}
-      <div className="md:hidden space-y-2.5">
+      {/* Mobile / tablet cards */}
+      <div className="xl:hidden space-y-2.5">
         {filtered.map((s) => (
           <button
             key={s.id}
             onClick={() => setSelectedStudent(s)}
-            className="w-full text-left bg-white rounded-2xl border border-gray-200 p-3 shadow-sm hover:border-saffron-300 active:scale-[0.98] transition-all"
+            className="w-full text-left bg-white rounded-2xl border border-gray-200 p-3.5 shadow-sm hover:border-saffron-300 active:scale-[0.98] transition-all"
           >
             <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-lg leading-none">
-                  {RANK_MEDALS[s.rank] || <span className="text-gray-500 font-mono text-sm">#{s.rank}</span>}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg leading-none flex-shrink-0">
+                    {RANK_MEDALS[s.rank] || <span className="text-gray-500 font-mono text-sm">#{s.rank}</span>}
+                  </span>
+                  <div className="font-semibold text-gray-900 leading-snug">{s.name}</div>
                 </div>
-                <div className="font-semibold text-gray-900 truncate mt-1">{s.name}</div>
-                <div className="text-xs text-gray-500 mt-0.5">
-                  {s.class || '—'} • {s.room_no ? `Room ${s.room_no}` : '—'} • {s.group || '—'}
-                </div>
+                <dl className="mt-2 space-y-1 text-xs text-gray-600">
+                  <div className="flex gap-2">
+                    <dt className="text-gray-400 flex-shrink-0 w-24">Roll No</dt>
+                    <dd className="font-mono font-semibold text-gray-800">{s.roll_no || '—'}</dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt className="text-gray-400 flex-shrink-0 w-24">Paathshala</dt>
+                    <dd className="leading-snug">{s.paathshala_name || '—'}</dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt className="text-gray-400 flex-shrink-0 w-24">Father</dt>
+                    <dd className="leading-snug">{s.father_name_display || '—'}</dd>
+                  </div>
+                </dl>
               </div>
-              <div className="text-right">
+              <div className="text-right flex-shrink-0">
                 <div className="text-[11px] text-gray-500">Points</div>
                 <div className="font-bold text-saffron-600 text-lg leading-tight">{s.total_points}</div>
               </div>
             </div>
 
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              <span className="bg-forest-100 text-forest-700 px-2 py-0.5 rounded-full text-[11px] font-semibold">
-                {normalizeAgeGroup(s.batch) || 'No Batch'}
-              </span>
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              {s.room_no && (
+                <span className="bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full text-[11px] font-semibold">
+                  Room {s.room_no}
+                </span>
+              )}
+              {s.group && (
+                <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full text-[11px] font-semibold">
+                  {s.group}
+                </span>
+              )}
               <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${CATEGORY_COLORS[s.category]}`}>
                 {t(`admin.category.${s.category.toLowerCase().replace('-', '')}`) || s.category}
               </span>
@@ -1165,62 +1200,75 @@ export default function AdminLeaderboard() {
         )}
       </div>
 
-      {/* Desktop table */}
-      <div className="hidden md:block bg-white rounded-2xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+      {/* Desktop table — scroll horizontally when columns exceed viewport */}
+      <div className="hidden xl:block bg-white rounded-2xl border border-gray-200 max-w-full">
+        <div className="overflow-x-auto overscroll-x-contain rounded-2xl">
+          <table className="text-sm w-max min-w-full">
             <thead className="bg-forest-700 text-white">
               <tr>
-                <th className="px-4 py-3 text-left w-16">{t('admin.rank')}</th>
-                <th className="px-4 py-3 text-left">{t('common.name')}</th>
-                <th className="px-4 py-3 text-left">{t('common.class')}</th>
-                <th className="px-4 py-3 text-left">{t('common.batch')}</th>
-                <th className="px-4 py-3 text-left">Room</th>
-                <th className="px-4 py-3 text-left">{t('common.group')}</th>
-                <th className="px-4 py-3 text-left">Gender</th>
-                <th className="px-4 py-3 text-left">Age</th>
-                <th className="px-4 py-3 text-right">Total Points</th>
-                <th className="px-4 py-3 text-center">Category</th>
+                <th className="px-3 py-3 text-left w-14 sticky left-0 z-20 bg-forest-700">{t('admin.rank')}</th>
+                <th className="px-3 py-3 text-left min-w-[120px] max-w-[160px] sticky left-14 z-20 bg-forest-700 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.3)]">{t('common.name')}</th>
+                <th className="px-3 py-3 text-left whitespace-nowrap">Roll No</th>
+                <th className="px-3 py-3 text-left min-w-[160px] max-w-[200px]">Paathshala</th>
+                <th className="px-3 py-3 text-left min-w-[120px] max-w-[160px]">Father</th>
+                <th className="px-3 py-3 text-left whitespace-nowrap">Room</th>
+                <th className="px-3 py-3 text-left min-w-[100px] max-w-[140px]">{t('common.group')}</th>
+                <th className="px-3 py-3 text-left whitespace-nowrap">Gender</th>
+                <th className="px-3 py-3 text-left whitespace-nowrap">Age</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap sticky right-[88px] z-20 bg-forest-700 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.3)]">Points</th>
+                <th className="px-3 py-3 text-center whitespace-nowrap sticky right-0 z-20 bg-forest-700 min-w-[88px]">Category</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((s, i) => (
+              {filtered.map((s, i) => {
+                const rowBg = i % 2 === 0 ? 'bg-white' : 'bg-gray-50';
+                return (
                 <tr
                   key={s.id}
                   onClick={() => setSelectedStudent(s)}
-                  className={`border-b last:border-0 cursor-pointer hover:bg-saffron-50 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'} ${s.rank <= 3 ? 'font-semibold' : ''}`}
+                  className={`group border-b last:border-0 cursor-pointer hover:bg-saffron-50 transition-colors ${rowBg} ${s.rank <= 3 ? 'font-semibold' : ''}`}
                 >
-                  <td className="px-4 py-3 text-center">
+                  <td className={`px-3 py-3 text-center sticky left-0 z-10 group-hover:bg-saffron-50 ${rowBg}`}>
                     {RANK_MEDALS[s.rank] || <span className="text-gray-500 font-mono">#{s.rank}</span>}
                   </td>
-                  <td className="px-4 py-3 font-semibold text-gray-900">{s.name}</td>
-                  <td className="px-4 py-3 text-gray-700">{s.class}</td>
-                  <td className="px-4 py-3">
-                    <span className="bg-forest-100 text-forest-700 px-2 py-0.5 rounded-full text-xs font-semibold">{normalizeAgeGroup(s.batch)}</span>
+                  <td className={`px-3 py-3 font-semibold text-gray-900 sticky left-14 z-10 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.08)] max-w-[160px] group-hover:bg-saffron-50 ${rowBg}`}>
+                    <span className="block truncate" title={s.name}>{s.name}</span>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3 text-gray-700 font-mono text-xs whitespace-nowrap">{s.roll_no || <span className="text-gray-400">—</span>}</td>
+                  <td className="px-3 py-3 text-gray-700 max-w-[200px]">
+                    <span className="block truncate" title={s.paathshala_name || ''}>{s.paathshala_name || <span className="text-gray-400">—</span>}</span>
+                  </td>
+                  <td className="px-3 py-3 text-gray-700 max-w-[160px]">
+                    <span className="block truncate" title={s.father_name_display || ''}>{s.father_name_display || <span className="text-gray-400">—</span>}</span>
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap">
                     {s.room_no ? <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full text-xs font-semibold">{s.room_no}</span> : <span className="text-gray-400">—</span>}
                   </td>
-                  <td className="px-4 py-3 text-gray-700">{s.group}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3 text-gray-700 max-w-[140px]">
+                    <span className="block truncate" title={s.group || ''}>{s.group || <span className="text-gray-400">—</span>}</span>
+                  </td>
+                  <td className="px-3 py-3 whitespace-nowrap">
                     {normalizeGender(s.gender) ? (
                       <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${normalizeGender(s.gender) === 'Male' ? 'bg-blue-50 text-blue-700' : 'bg-pink-50 text-pink-700'}`}>
                         {normalizeGender(s.gender)}
                       </span>
                     ) : <span className="text-gray-400">—</span>}
                   </td>
-                  <td className="px-4 py-3 text-gray-700">{s.age || <span className="text-gray-400">—</span>}</td>
-                  <td className="px-4 py-3 text-right font-bold text-saffron-600 text-base">{s.total_points}</td>
-                  <td className="px-4 py-3 text-center">
-                    <span className={`px-2 py-1 rounded-full text-xs font-bold border ${CATEGORY_COLORS[s.category]}`}>
+                  <td className="px-3 py-3 text-gray-700 whitespace-nowrap">{s.age || <span className="text-gray-400">—</span>}</td>
+                  <td className={`px-3 py-3 text-right font-bold text-saffron-600 text-base whitespace-nowrap sticky right-[88px] z-10 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.08)] group-hover:bg-saffron-50 ${rowBg}`}>{s.total_points}</td>
+                  <td className={`px-3 py-3 text-center sticky right-0 z-10 min-w-[88px] group-hover:bg-saffron-50 ${rowBg}`}>
+                    <span className={`px-2 py-1 rounded-full text-xs font-bold border whitespace-nowrap ${CATEGORY_COLORS[s.category]}`}>
                       {t(`admin.category.${s.category.toLowerCase().replace('-', '')}`) || s.category}
                     </span>
                   </td>
                 </tr>
-              ))}
+              );})}
             </tbody>
           </table>
         </div>
+        <p className="px-3 py-1.5 text-[11px] text-gray-400 border-t border-gray-100">
+          Scroll horizontally if columns are hidden
+        </p>
         {filtered.length === 0 && (
           <div className="text-center py-12 text-gray-400">{t('common.noResults')}</div>
         )}
